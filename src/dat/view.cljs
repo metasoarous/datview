@@ -7,7 +7,6 @@
             [dat.view.router :as router]
             [dat.view.utils :as utils]
             [dat.spec.protocols :as protocols]
-            [dat.sync.client :as dat.sync]
             [datascript.core :as d]
             [posh.core :as posh]
             [reagent.core :as r]
@@ -680,7 +679,8 @@
   (start [component]
     (try
       (log/info "Starting Datview")
-      (let [base-schema (utils/deep-merge dat.sync/base-schema (:datascript/schema config))
+      ;; TODO Ugg... need to have a way for Datsync to register its default schema
+      (let [base-schema {:db/ident {:db/ident :db/ident :db/unique :db.unique/identity}}
             ;; Should try switching to r/atom
             ;conn (or conn (::conn config) (r/atom (d/empty-db base-schema)))
             conn (or conn (::conn config) (d/create-conn base-schema))

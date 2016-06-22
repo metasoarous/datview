@@ -1,0 +1,259 @@
+
+{:datview/base-schema
+ {:txes
+  [[;; ## Top level, generic, polymorphic attributes
+    ;;
+    {:db/id          #db/id[:db.part/db]
+     :db/ident       :e/name
+     :db/valueType   :db.type/string
+     :db/cardinality :db.cardinality/one
+     :db/doc         "A name; polymorphic; could relate to anything"
+     :db.install/_attribute :db.part/db}
+    {:db/id          #db/id[:db.part/db]
+     :db/ident       :e/description
+     :db/valueType   :db.type/string
+     :db/cardinality :db.cardinality/one
+     :db/doc         "A generic, polymorhpic description attribute"
+     :db.install/_attribute :db.part/db}
+    {:db/id          #db/id[:db.part/db]
+     :db/ident       :attribute/label
+     :db/valueType   :db.type/string
+     :db/cardinality :db.cardinality/one
+     :db/doc         "The label string of an attribute (for forms and views)"
+     :db.install/_attribute :db.part/db}]
+   ;; Giving :attribute/label it's own :attribute/label
+   [[:db/add :attribute/label :attribute/label "Attribute Label"]
+    [:db/add :e/name :attribute/label "Name"]
+    [:db/add :e/description :attribute/label "Description"]]
+   [{:db/id          #db/id[:db.part/db]
+     :attribute/label "Hide attribute?"
+     :db/ident       :attribute/hidden?
+     :db/valueType   :db.type/boolean
+     :db/cardinality :db.cardinality/one
+     :db/doc         "Should this attribute be hidden in views and forms?"
+     :db.install/_attribute :db.part/db}]
+   ;;
+   ;;
+   ;; # Type hierarchy
+   ;; ================
+   ;;
+   ;; * type/Entity; You typically inherit from Entity, though you don't strictly need to
+   ;;   * type/MaterializedEntity; This is something you would compute from data in datomic; Don't need to use
+   ;;   * type/Type; A type
+   ;;
+   ;; Note that in these type definitions, the only attribute we have to add are the generics (:e/name, mostly)
+   ;;
+   ;; These are the abstract types from which we'll want to be able to inherit
+   [{:db/id          #db/id[:db.part/db]
+     :db/ident       :e/type
+     :db/valueType   :db.type/ref
+     :db/cardinality :db.cardinality/one
+     :db/doc         "Specifies the type of a given entity"
+     :db.install/_attribute :db.part/db}
+    {:db/id     #db/id[:db.part/user]
+     :db/ident  :e.type/Type
+     :db/doc    "A type type... Cause we be meta-like-that"
+     :e/name    "Type"}]
+   ;; This maybe should have an :attribute/label attribute itself, if we dynamically generate new record types
+   [{:db/id          #db/id[:db.part/db]
+     :db/ident       :attribute.ref/types
+     :db/valueType   :db.type/ref
+     :db/cardinality :db.cardinality/many
+     :db/doc         "For a reference attribute, what e.types are acceptable?"
+     :db.install/_attribute :db.part/db}]
+   [[:db/add :attribute.ref/types :attribute.ref/types :e.type/Type]]
+   [{:db/id          #db/id[:db.part/db]
+     :db/ident       :e.type/attributes
+     :db/valueType   :db.type/ref
+     :db/cardinality :db.cardinality/many
+     :db/doc         "The attributes associated with a paritcular :e/type. Mainly useful for dynamically building forms."
+     :attribute/label "Attributes"
+     :db.install/_attribute :db.part/db}]
+   [{:db/id          #db/id[:db.part/db]
+     :db/ident       :e.type/isa
+     :db/valueType   :db.type/ref
+     :attribute.ref/types [:e.type/Type]
+     :db/cardinality :db.cardinality/many
+     :attribute/label "Ancestral Type"
+     :db/doc         "Indicates that one entity type 'is' some special case of another, and should inherit all of it's fields. We can build multimethod hierarchies out of these things."
+     :db.install/_attribute :db.part/db}]
+   [[:db/add :e.type/Type :e/type :e.type/Type]]
+   [{:db/id     #db/id[:db.part/user]
+     :db/ident  :e.type/Entity
+     :e/type    :e.type/Type
+     :e/name    "Entity"
+     :db/doc    "Abstract entity type, from which all other types inherit."}]
+   [{:db/id      #db/id[:db.part/user]
+     :db/ident   :e.type/EntityAttribute
+     ;; Are there any subtypes here?
+     :e/type     :e.type/Type
+     :e/name     "Entity Attribute"
+     :e.type/isa :e.type/Entity
+     :e.type/attributes [:db/ident :attribute/label :db/doc :db/valueType :attribute/hidden?]}
+    {:db/id      #db/id[:db.part/user]
+     :db/ident   :e.type/MaterializedEntity
+     :e/type     :e.type/Type
+     :e/name     "Materialized Entity"
+     :db/doc     "This may not be the best name, but it represents a computed value from the db that should behave roughly like an entity."}]
+   [[:db/add :e.type/attributes :attribute.ref/types :e.type/EntityAttribute]]
+   ;; The following are for some little helper types for Datview widgets and things
+   [{:db/id     #db/id[:db.part/user]
+     :db/ident  :e.type/Tag
+     :e/type    :e.type/Type
+     :e.type/attributes [:e/name]}
+    {:db/id #db/id[:db.part/user]
+     :db/ident :e.type/Category
+     :e/type :e.type/Type
+     :e/name "Category"
+     :e.type/attributes [:e/name :e/description]
+     :e.type/isa :e.type/Entity}
+    {:db/id      #db/id[:db.part/user]
+     :db/ident   :e.type/FileAttachment
+     :e/type     :e.type/Type
+     :e/name     "File Attachment"
+     :db/doc     "A file attachment which can be placed on any entity you wish"}]
+    ;; XXX Need to make this a ref instead of a keyword, but that will end up being a mess of rewriting
+   [
+    {:db/id          #db/id[:db.part/db]
+     :db/ident       :e/tags
+     :db/valueType   :db.type/ref
+     ;; Need to make sure of these...
+     :attribute.ref/types [:e.type/Tag]
+     :db/cardinality :db.cardinality/many
+     :db/doc         "The user defined tags associated with an entity."
+     :db.install/_attribute :db.part/db}
+    {:db/id          #db/id[:db.part/db]
+     :db/ident       :e/category
+     :db/valueType   :db.type/ref
+     :attribute.ref/types [:e.type/Category]
+     :db/cardinality :db.cardinality/one
+     :db/doc         "The user defined category of an item."
+     :db.install/_attribute :db.part/db}]
+   ;[[:db/add :db/id :attribute/hidden? true]]
+   ;; should have abstract `ordered` operations for some general purpose dat lib (maybe datview for now, but
+   ;; maybe this should be something like datcore; general purpose datomic/datascript utilities?)
+   [{:db/id          #db/id[:db.part/db]
+     :db/ident       :e/order
+     :db/valueType   :db.type/long
+     :db/cardinality :db.cardinality/one
+     :db/doc         "Abstract representation of somethings order as a reference"
+     :attribute/label "Order"
+     :db.install/_attribute :db.part/db}
+    {:db/id          #db/id[:db.part/db]
+     :db/ident       :datview.creation/token
+     :db/valueType   :db.type/uuid
+     :db/cardinality :db.cardinality/one
+     :db/doc         "A remote token used for referencing new entities created on clients (should this be datsync really? What are the semantics of this thing?)"
+     :attribute/label "Datview creation token"
+     :db.install/_attribute :db.part/db}]
+   ;;
+   ;; ## Comment
+   ;;
+   ;; Mostly just a :note/body, but maybe has a description and name as well
+   [{:db/id      #db/id[:db.part/user]
+     :db/ident   :e.type/Comment
+     :e/type     :e.type/Type
+     :e/name     "Comment"
+     :e.type/isa :e.type/Entity}]
+   [{:db/id          #db/id[:db.part/db]
+     :db/ident       :e/comments
+     :db/valueType   :db.type/ref
+     :db/cardinality :db.cardinality/many
+     :db/doc         "A reference to a comment"
+     :db/isComponent true
+     :attribute/label "Comments"
+     :attribute.ref/types [:e.type/Comment]
+     :e.type/_attributes :e.type/Comment
+     :db.install/_attribute :db.part/db}]
+   [{:db/id          #db/id[:db.part/db]
+     :db/ident       :comment/body
+     :db/valueType   :db.type/string
+     :db/cardinality :db.cardinality/one
+     :db/fulltext    true
+     :db/doc         "The text body of a comment"
+     :attribute/label "Abbreviation"
+     :e.type/_attributes :e.type/Comment
+     :db.install/_attribute :db.part/db}
+    {:db/id          #db/id[:db.part/db]
+     :db/ident       :comment/author
+     :db/valueType   :db.type/ref
+     :db/cardinality :db.cardinality/one
+     :db/doc         "The abstract author of a comment."
+     :attribute/label "Author"
+     :e.type/_attributes :e.type/Comment
+     :db.install/_attribute :db.part/db}]
+    ;;
+    ;; ### Have to attach things to comments like this: TODO
+    ;; How you hook up what things can be commented on:
+    ;[[:db/add :e.type/YourType :e.type/attributes :e/comments]
+     ;[:db/add :e.type/YourOtherType :e.type/attributes :e/comments]]
+    ;; How you hook up what things can be comment authors
+    ;[[:db/add :comment/author :attrbute.ref/types :s.type/YourType]]
+   ;;
+   ;; ## Built in file attatchments
+   [{:db/id          #db/id[:db.part/db]
+     :db/ident       :file.attachment/filename
+     :db/valueType   :db.type/string
+     :db/cardinality :db.cardinality/one
+     :db/doc         "The filename of a file attachment"
+     :attribute/label "The file name"
+     :e.type/_attributes :e.type/FileAttachment
+     :db.install/_attribute :db.part/db}
+    {:db/id          #db/id[:db.part/db]
+     :db/ident       :file.attachment/content-type
+     :db/valueType   :db.type/string
+     :db/cardinality :db.cardinality/one
+     :db/doc         "Classic content-type string"
+     :attribute/label "Content type"
+     :db.install/_attribute :db.part/db}
+    {:db/id          #db/id[:db.part/db]
+     :db/ident       :file.attachment/uploaded?
+     :db/valueType   :db.type/boolean
+     :db/cardinality :db.cardinality/one
+     :db/doc         "Whether or not the file has been uploaded; we can use this to trigger "
+     :attribute/label "File uploaded?"
+     :db.install/_attribute :db.part/db}
+    {:db/id          #db/id[:db.part/db]
+     :db/ident       :e/attachments
+     :db/valueType   :db.type/ref
+     :db/isComponent true
+     :db/cardinality :db.cardinality/many
+     :db/doc         "File attachments for an entity"
+     :attribute/label "File attachments"
+     :attribute.ref/types [:e.type/FileAttachment]
+     :db.install/_attribute :db.part/db}]
+   ;;; You'll have to install on your attributes like TODO
+   ;[[:db/add :e.type/YourType :e.type/attributes :e/attachments]
+    ;[:db/add :e.type/YourOtherType :e.type/attributes :e/attachments]]
+   ;;
+   ;; Copy functionality
+   [{:db/id          #db/id[:db.part/db]
+     :db/ident       :e/copy-of
+     :db/valueType   :db.type/ref
+     :db/cardinality :db.cardinality/one
+     :db/doc         "Notates that this entity is a copy of some other entity; used for making it easy to copy over comments etc"
+     :attribute/label "Copy of"
+     :attribute.ref/types [:e.type/Entity]
+     :db.install/_attribute :db.part/db}]]}
+ ;;
+ ;; Future migrations will go here...
+ ;:datview/future-extension
+ ;{:requires :datview/base-schema
+  ;:txes
+  ;[;; Domain types
+   ;[{:db/id #db/id[:db.part/db]
+     ;:db/ident :e.type/Category}
+    ;{:db/id #db/id[:db.part/db]
+     ;:db/ident :e.type/Tag}]
+   ;;; Domain model attributes
+   ;[{:db/id          #db/id[:db.part/db]
+     ;:db/ident       :category/subcategory
+     ;:db/valueType   :db.type/ref
+     ;:db/isComponent true
+     ;:db/cardinality :db.cardinality/many
+     ;:db/doc         "Imaginary subcategories"
+     ;:db.install/_attribute :db.part/db}]]}
+ ;; End of schema
+ }
+
+

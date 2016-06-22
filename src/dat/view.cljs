@@ -59,30 +59,22 @@
   ([app event level]
    (dispatcher/dispatch! (:dispatcher app) event level)))
 
-
 (s/def ::dispatch-args (s/cat :app ::app  :event ::event :level (s/? keyword?)))
 
-
-(s/fdef dispatch :args ::dispatch-args)
-
-
+(s/fdef dispatch!
+        :args ::dispatch-args
+        :ret (constantly true))
 
 (defn dispatch-error!
   [app event]
   (dispatcher/dispatch-error! (:dispatcher app) event))
 
-
-(s/fdef dispatch-error! :args (s/cat :app ::app :event ::event))
-
-
+(s/fdef dispatch-error!
+        :args (s/cat :app ::app :event ::event)
+        :ret (constantly true))
 
 (defn send-tx! [app tx-forms]
   (dispatch! app [:dat.sync.client/send-remote-tx tx-forms]))
-
-
-
-
-
 
 
 

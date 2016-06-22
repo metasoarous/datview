@@ -12,9 +12,13 @@
                  [datreactor "0.0.1-alpha1-SNAPSHOT"]
                  ;; Other stuff
                  [com.stuartsierra/component "0.3.1"]
-                 [datascript "0.13.3"]
+                 [com.andrewmcveigh/cljs-time "0.4.0"]
+                 [testdouble/clojurescript.csv "0.2.0"]
+                 [datascript "0.15.0"]
                  [posh "0.3.3.1"]
                  [reagent "0.5.1"]
+                 [re-com "0.8.3"]
+                 [bidi "2.0.9"]
                  [io.rkn/conformity "0.4.0"] ;; should this be here?
                  [prismatic/plumbing "0.5.2"]] ;; aren't using currently
   ;;

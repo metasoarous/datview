@@ -5,8 +5,7 @@
             [dat.view.query :as query]
             ;; Need to switch to datview XXX
             [dat.view :as datview]
-            [dat.sync.client :as datsync]
-            [dat.sys.shared.utils :as utils]
+            [dat.view.utils :as utils]
             [datascript.core :as d]
             [posh.core :as posh]
             [reagent.core :as r]
@@ -16,8 +15,7 @@
             [cljs-time.format]
             [cljs-time.coerce]
             [cljs.pprint :as pp]
-            [cljs.core.match :as match :refer-macros [match]]
-            #_[markdown.core :as md]))
+            [cljs.core.match :as match :refer-macros [match]]))
 
 
 
@@ -145,8 +143,8 @@
   ())
 
 (defn timeint-from-datetime
-  [datetime]
-  )
+  [datetime])
+
 
 (defn datetime-selector
   [app eid attr-ident value]
@@ -497,7 +495,7 @@
 
 
 (swap! datview/default-base-context
-  utils/deep-merge
+       utils/deep-merge
   ;; Top level just says that this is our configuration? Or is that not necessary?
   {:dat.view/base-config
    {::pull-form

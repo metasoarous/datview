@@ -255,13 +255,10 @@
            @(base-context app))))
       ([app component-id]
        (component-context* app component-id {}))
-      ([app component-id {:as options
-                           ;; Options, in order of precedence in consequent merging
-                           :keys [dat.view/locals ;; points to local overrides; highest precedence
-                                  ;; When the component is in a scope closed over by some particular attribute:
-                                  dat.view/attr ;; db/ident of the attribute; precedence below locals
-                                  dat.view/valueType ;; The :db/valueType of the attribute (as ident); lower precedence still
-                                  dat.view/cardinality]}] ;; Cardinality (ident) of the value type; lowest precedence
+      ([app component-id {;; Options, in order of precedence in consequent merging
+                          :keys [dat.view/locals ;; points to local overrides; highest precedence
+                                 ;; When the component is in a scope closed over by some particular attribute:
+                                 dat.view/attr]}] ;; db/ident of the attribute; precedence below locals
        (reaction
          (let [merged (utils/deep-merge @(component-context app) (utils/deref-or-value locals))]
            (if attr

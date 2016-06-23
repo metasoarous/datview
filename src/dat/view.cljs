@@ -669,7 +669,8 @@
     (try
       (log/info "Starting Datview")
       ;; TODO Ugg... need to have a way for Datsync to register its default schema
-      (let [base-schema {:db/ident {:db/ident :db/ident :db/unique :db.unique/identity}}
+      (let [base-schema (utils/deep-merge {:db/ident {:db/ident :db/ident :db/unique :db.unique/identity}}
+                                          (:datascript/schema config))
             ;; Should try switching to r/atom
             ;conn (or conn (::conn config) (r/atom (d/empty-db base-schema)))
             conn (or conn (::conn config) (d/create-conn base-schema))

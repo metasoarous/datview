@@ -27,6 +27,24 @@
 
 
 
+
+;; ## Represent
+
+;; This is really the cornerstone of all of dat.view
+;; This multimethod represents the abstract ability to render/represent something based on abstract context
+
+(defmulti represent
+  (fn [app [context-id context-data] data]
+    context-id))
+
+
+;; ## Events
+
+;; Speccing some things out about events.
+;; Much of this should all get moved over to the datspec namespace probably.
+;; Only datview specific things should stay here.
+
+
 (s/def ::event-id (s/and keyword? namespace))
 
 (s/def ::event (s/and vector? (s/cat :event-id  ::event-id
@@ -36,7 +54,7 @@
 
 (s/def ::dispatcher #(satisfies? protocols/PDispatcher %))
 
-;;todo
+;; TODO:
 (s/def ::base-context map?)
 
 
@@ -59,7 +77,7 @@
   ([app event level]
    (dispatcher/dispatch! (:dispatcher app) event level)))
 
-(s/def ::dispatch-args (s/cat :app ::app  :event ::event :level (s/? keyword?)))
+(s/def ::dispatch-args (s/cat :app ::app :event ::event :level (s/? keyword?)))
 
 (s/fdef dispatch!
         :args ::dispatch-args
@@ -74,6 +92,8 @@
         :ret (constantly true))
 
 (defn send-tx! [app tx-forms]
+  "Helper function for dispatching tx messages to server."
+  ;; TODO This should be smarter, and look to see whether dat.sys is loaded, and dispatch occordingly
   (dispatch! app [:dat.sync.client/send-remote-tx tx-forms]))
 
 
@@ -187,6 +207,8 @@
       @trigger
       @vanilla-atom)))
 
+;; XXX This will be coming to posh soon, but in case we need it earlier
+
 (defn pull-many
   [app pattern eids]
   (let [conn-reaction (as-reaction (:conn app))]
@@ -294,11 +316,13 @@
 
 ;; ## Client Helper components
 
+;; Need to think about the abstract shape of a control like a button
+
 (defn collapse-button
   "A collapse button for hiding information; arg collapse? should be a bool or an ratom thereof.
   If no click handler is specified, toggles the atom."
   ([collapse? on-click-fn]
-   (let [[icon-name tooltip] (if (try @collapse? (catch js/Object e collapse?)) ;; not positive this will work the way I expect
+   (let [[icon-name tooltip] (if (utils/deref-or-value collapse?) ;; not positive this will work the way I expect
                                ["zmdi-caret-right" "Expand collection"]
                                ["zmdi-caret-down" "Hide collection"])]
      [re-com/md-icon-button :md-icon-name icon-name
@@ -308,13 +332,15 @@
    (collapse-button collapse? (fn [] (swap! collapse? not)))))
 
 
+
 ;; ## Builder pieces
 
 ;; These are builder pieces part of the public api;
 ;; These should be accessible for wrapping, and should be overridable/extensible via correspondingly named keys of the context map at various entry points
 
-(defn pull-summary
-  [pull-data]
+
+(defmethod represent ::pull-summary-string
+  [_ _ pull-data]
   (match [pull-data]
     [{:e/name name}] name
     [{:e/type {:db/ident type-ident}}] (name type-ident)
@@ -322,42 +348,35 @@
     ;; A terrible assumption really, but fine enough for now
     :else (pr-str pull-data)))
 
-(defn pull-summary-view
-  [app context pull-data]
-  [:div {:style {:font-weight "bold" :padding "5px"}}
-   (pull-summary pull-data)])
+(defn pull-summary-string
+  [app context-data pull-data]
+  (represent app [::pull-summary-string context-data] pull-data))
 
-(defn collapse-summary
-  [app context values]
+
+(defmethod represent :pull-summary-view
+  [app [_ context-data] pull-data]
+  [:div {:style {:font-weight "bold" :padding "5px"}}
+   (represent app [::pull-summary context-data] pull-data)])
+
+(defn pull-summary-view
+  [app context-data pull-data]
+  (represent app [::pull-summary-view context-data] pull-data))
+
+
+(defmethod represent ::collapse-summary
+  [app [_ context-data] values]
   ;; XXX Need to stylyze and take out of re-com styling
   [:div {:style (merge v-box-styles
                        {:padding "10px"})}
-                       ;:align :end
-                       ;:gap "20px"
-   (for [value values]
+                        ;:align :end
+                        ;:gap "20px"
+   (for [value (distinct values)]
      ^{:key (hash value)}
-     [pull-summary-view app context value])])
+     [pull-summary-view app context-data value])])
 
-;; These summary things are still kinda butt ugly.
-;; And they're something we need to generally spend more time on anyway.
-;; Need to smooth out... XXX
-
-
-
-;; ## Event handler
-
-;; Need an even handler which can dispatch on some transaction patterns, and execute various messages or side effects.
-;; I think posh may give this to us?
-;; Or did in an old version?
-
-
-;; ## Datview schema spec
-
-
-;; ## Import
-
-;; This is a great ingestion format
-;; Make it possible to build semantic parsers for data on top of other web pages :-)
+(defn collapse-summary
+  [app context-data values]
+  (represent app [::collapse-summary context-data] values))
 
 
 
@@ -371,23 +390,22 @@
   (let [[x & xs] (clojure.string/split (name attr-ident) #"-")]
     (clojure.string/join " " (concat [(clojure.string/capitalize x)] xs))))
 
-(defn label-view
-  [app attr-ident]
+
+(defmethod represent ::label-view
+  [app [_ context-data] attr-ident]
   (when attr-ident
     [re-com/label
      :style {:font-size "14px"
              :font-weight "bold"}
      :label
      ;; XXX Again, should be pull-based
-     (or @(posh/q (:conn app)
-                  '[:find ?attr-label .
-                    :in $ ?attr-ident
-                    :where [?attr :db/ident ?attr-ident]
-                           [?attr :attribute/label ?attr-label]]
-                  attr-ident)
+     (or (:attribute/label @(posh/pull (:conn app) [:attribute/label] [:db/ident attr-ident]))
          (lablify-attr-ident attr-ident))]))
 
-
+(defn label-view
+  "For a given attr-ident, render a label for that attribute."
+  [app context-data attr-ident]
+  (represent app [::label-view context-data] attr-ident))
 
 
 (defn get-nested-pull-expr
@@ -406,107 +424,132 @@
 
 ;; Summary needs to be handled somewhat more cleverly... Set up as a special function that returns the corresponding pull-expr component?
 
+
 (declare pull-data-view)
-
-;; XXX This will be coming to posh soon, but in case we need it earlier
-
-;; Still have to implement notion of hidden attributes at a database level
 
 
 ;; Still need to hook up with customized context
-(defn pull-view-controls
-  [app pull-expr pull-data]
-  (let [pull-data (utils/deref-or-value pull-data)
-        view-spec (meta pull-expr)]
-    [:div (:dom/attrs @(component-context app ::pull-view-controls {::locals (meta pull-expr)}))
-     [re-com/md-icon-button :md-icon-name "zmdi-copy"
-                            :size :smaller
-                            :style {:margin-right "10px"}
-                            :tooltip "Copy entity"
-                            :on-click (fn [] (js/alert "Coming soon to a database application near you"))]
-     [re-com/md-icon-button :md-icon-name "zmdi-edit"
-                            :style {:margin-right "10px"}
-                            :size :smaller
-                            :tooltip "Edit entity"
-                            ;; This assumes the pull has :dat.sync.remote.db/id... automate?
-                            :on-click (fn [] (router/set-route! app {:handler :edit-entity :route-params {:db/id (:dat.sync.remote.db/id pull-data)}}))]]))
+
+(defmethod represent ::copy-entity-control
+  [app [_ context-data] pull-data]
+  (let [pull-data (utils/deref-or-value pull-data)]
+    ;; TODO Need to figure out the right way to configure the re-com components
+    [re-com/md-icon-button :md-icon-name "zmdi-copy"
+     :size :smaller
+     :style {:margin-right "10px"}
+     :tooltip "Copy entity" ;; XXX Should make tooltip fn-able
+     :on-click (fn [] (js/alert "Coming soon to a database application near you"))]))
+
+(defmethod represent ::edit-entity-control
+  [app [_ context-data] pull-data]
+  (let [pull-data (utils/deref-or-value pull-data)]
+    [re-com/md-icon-button :md-icon-name "zmdi-edit"
+     :style {:margin-right "10px"}
+     :size :smaller
+     :tooltip "Edit entity"
+     ;; This assumes the pull has :dat.sync.remote.db/id... automate?
+     :on-click (fn [] (router/set-route! app {:handler :edit-entity :route-params {:db/id (:dat.sync.remote.db/id pull-data)}}))]))
+
+
+;; TODO Need a way to figure out which controls are needed for a given component
+(defn component-controls
+  [context-data]
+  ;; For now..
+  (::controls context-data))
+
+(defmethod represent ::control-set
+  [app [_ context-data] data]
+  (let [context-data (component-context app ::control-set {::locals context-data})]
+    ;; XXX This was ::pull-view-controls, now ::control-set
+    [:div (:dom/attrs @(component-context app ::pull-view-controls {::locals context-data}))
+     (for [control-id (distinct (component-controls context-data))]
+       ^{:key (hash control-id)}
+       [represent app [control-id context-data] data])]))
+
+
+
+(defn default-pull-view-controls
+  [app context-data pull-data]
+  (let [context [::controls (assoc context-data ::controls [::copy-entity-control ::edit-entity-control])]]
+    (represent app context pull-data)))
 
 (defn default-field-for-controls
   [app pull-expr pull-data]
   (let [context (component-context app ::default-field-for-controls {::locals (meta pull-expr)})]
     [:div (:dom/attrs context)])) 
 
-;(defn)
 
-(defn value-view
-  [app pull-expr attr-ident value]
+(defmethod represent ::value-view
+  ;; QUESTION Should attr-ident be part of the context-data?
+  [app [_ context-data] [attr-ident value]]
   (let [attr-sig @(attribute-signature-reaction app attr-ident)
-        context @(component-context app ::value-view {::locals (meta pull-expr)})]
+        context @(component-context app ::value-view {::locals context-data})]
     [:div (:dom/attrs context)
      ;[debug "Here is the comp-attrs:" attr-sig]
      (match [attr-sig]
        ;; For now, all refs render the same; May treat component vs non-comp separately later
        [{:db/valueType :db.type/ref}]
-       [pull-data-view app (get-nested-pull-expr pull-expr attr-ident) value]
+       (let [nested-context (assoc context-data ::pull-expr (get-nested-pull-expr (::pull-expr context-data) attr-ident))]
+         ;; QUESTION: Where should the nsted pull-expr go?
+         [represent app nested-context value])
        ;; Miscellaneous value
        :else
        (str value))]))
 
-  
+
+;; TODO Need to figure out the signature here
+;(defn value-view
+;  [app pull-expr attr-ident value]
+
+
 
 ;; Should we have a macro for building these components and dealing with all the state in the context? Did the merge for you?
 ;(defn build-view-component)
 
-(defn attr-values-view
-  [app pull-expr attr-ident values]
-  (let [context @(component-context app ::attr-values-view {::locals (meta pull-expr)})
+(defmethod represent ::attr-values-view
+  [app [_ context-data] [attr-ident values]]
+  (let [pull-expr (::pull-expr context-data)
+        context @(component-context app ::attr-values-view {::locals (meta pull-expr)})
         collapsable? (:dat.view.collapse/collapsable? context)
         ;; Should put all of the collapsed values in something we can serialize, so we always know what's collapsed
         collapse-attribute? (r/atom (:dat.view.collapse/default context))]
-    (fn [app pull-expr attr-ident values]
+    (fn [app [_ context-data] [attr-ident values]]
       [:div (:dom/attrs context)
        (when collapsable?
          [collapse-button collapse-attribute?])
        (when @collapse-attribute?
          [collapse-summary app context values])
-          ;(defn pull-summary-view [app pull-expr pull-data]
+       ;(defn pull-summary-view [app pull-expr pull-data]
        (when (or (not collapsable?) (and collapsable? (not @collapse-attribute?)))
          (for [value (utils/deref-or-value values)]
            ^{:key (hash value)}
-           [value-view app pull-expr attr-ident value]))])))
+           [represent app context-data [attr-ident value]]))])))
 
+
+;(defn attr-values-view
+;  [app context attr-ident values])
 
 
 ;; Need to have controls etc here
-(defn attr-view
-  [app pull-expr attr-ident values]
-  [:div (:dom/attrs @(component-context app ::attr-view {:dat.view/locals (meta pull-expr)})) 
+(defmethod represent ::attr-view
+  [app [_ context-data] [attr-ident values]]
+  [:div (:dom/attrs @(component-context app ::attr-view {:dat.view/locals context-data}))
   ;[:div @(attribute-context app (meta pull-expr) :attr-view)
    [label-view app attr-ident]
    (match [@(attribute-signature-reaction app attr-ident)]
      [{:db/cardinality :db.cardinality/many}]
-     [attr-values-view app pull-expr attr-ident values]
+     [represent app [::attr-values-view context-data] [attr-ident values]]
      :else
-     [value-view app pull-expr attr-ident values])])
+     [represent app [::value-view context-data] [attr-ident values]])])
 
 
-;; ## Security
-
-;; All messages have signatures; or can
-;; Can b e used to assert the h8istry of things
-
-;^{:set asside}
-
-;; You can even save your app metadata-query structures in the database :-)
-;; You can build these things atomically
-;; It's the perfect backbone, really
-;; Subsets fine
+;(defn attr-view
+;  [app pull-expr attr-ident values])
 
 
 ;; All rendering modes should be controllable via registered toggles or fn assignments
 ;; registration modules for plugins
 ;; * middleware?
-
 
 (defn pull-attributes
   ([pull-expr pull-data]
@@ -519,39 +562,45 @@
                  (case attr-spec
                    '* (filter
                         (set (pull-attributes (remove #{'*} pull-expr) []))
-                        (keys pull-data))))))
+                        (keys (utils/deref-or-value pull-data)))))))
         flatten
         distinct))
   ([pull-expr]
    (pull-attributes pull-expr [])))
 
-;; Should actually try to tackle this
 
-(defn pull-data-view
+(defmethod represent ::pull-data-view
+  [app [_ context-data] pull-data]
+  ;; Annoying to have to do this
+  (let [context @(component-context app ::pull-data-view {:dat.view/locals context-data})
+        pull-expr (::pull-expr context)
+        pull-data (utils/deref-or-value pull-data)]
+    [:div (:dom/attrs context)
+     [:div
+       [represent app [::control-set context-data] pull-data]
+       [:div {:style (merge h-box-styles)}
+        [represent app [::pull-summary-view context-data] pull-data]]]
+     ;; XXX TODO Questions:
+     ;; Need a react-id function that lets us repeat attrs when needed
+     (for [attr-ident (distinct (pull-attributes pull-expr pull-data))]
+       ^{:key (hash attr-ident)}
+       [represent app [::attr-view context-data] [attr-ident (get pull-data attr-ident)]])]))
+
+
+(defmethod represent ::pull-view
+  [app [_ context-data] [pull-expr eid]]
+  (let [pull-data (posh/pull (:conn app) pull-expr eid)]
+    [represent app [::pull-data-view (assoc context-data ::pull-expr pull-expr)] pull-data]))
+
+
+(defn pull-view
   "Given a DS connection, a app pull-expression and data from that pull expression (possibly as a reaction),
   render the UI subject to the pull-expr metadata."
   ;; Should be able to bind the data to the type dictated by pull expr
-  ([app, pull-expr, pull-data]
-   ;; Annoying to have to do this
-   (let [context @(component-context app ::pull-data-view {:dat.view/locals (meta pull-expr)})
-         pull-data (utils/deref-or-value pull-data)]
-     [:div (:dom/attrs context)
-      [:div
-        (when-let [controls @(component-context app ::pull-view-controls)]
-          [(:dat.view/component controls) app pull-expr pull-data])
-        (when-let [summary (:summary context)]
-          [:div {:style (merge h-box-styles)}
-           [summary app pull-expr pull-data]])]
-      ;; XXX TODO Questions:
-      ;; Need a react-id function that lets us repeat attrs when needed
-      (for [attr-ident (pull-attributes pull-expr pull-data)]
-        ^{:key (hash attr-ident)}
-        [attr-view app pull-expr attr-ident (get pull-data attr-ident)])])))
-
-(defn pull-view
-  ([app pull-expr eid]
-   [pull-data-view app pull-expr (posh/pull (:conn app) pull-expr eid)]))
-
+  ([app context-data pull-data]
+   [represent app [::pull-data-view context-data] pull-data])
+  ([app context-data pull-expr eid]
+   [represent app [::pull-view context-data] [pull-expr eid]]))
 
 ;; General purpose sortable collections in datomic/ds?
 ;; Should use :attribute/sort-by; default :db/id?
@@ -616,6 +665,7 @@
      ;; Hmm... maybe this should point to the keyword so it can grab from there?
      ::summary pull-summary-view
      ::component pull-view}
+    ;; XXX This should change shortly...
     ::pull-view-controls
     {:dom/attrs {:style (merge h-box-styles
                                {:padding "5px"})}
@@ -623,7 +673,7 @@
                                 ;;; Check if these actually make sense
                                 ;:justify-content "flex-end"})}}
                                 ;:gap "10px"
-     ::component pull-view-controls}
+     ::component default-pull-view-controls}
     ::pull-summary-view
     {:dom/attrs {:style (merge v-box-styles
                                {:padding "15px"

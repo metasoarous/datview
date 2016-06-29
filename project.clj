@@ -15,7 +15,7 @@
                  [com.andrewmcveigh/cljs-time "0.4.0"]
                  [testdouble/clojurescript.csv "0.2.0"]
                  [datascript "0.15.0"]
-                 [posh "0.3.3.1"]
+                 [posh "0.5.1"]
                  [reagent "0.5.1"]
                  [re-com "0.8.3"]
                  [bidi "2.0.9"]

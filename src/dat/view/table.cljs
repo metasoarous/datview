@@ -14,7 +14,7 @@
             [datascript.core :as d]
             [reagent.core :as r]
             [re-com.core :as re-com]
-            [posh.core :as posh]
+            [posh.reagent :as posh]
             [testdouble.cljs.csv :as csv]
             ;; Couldn't get this to work, but would be nice to try again
             ;[cljsjs.papaparse :as csv]
@@ -370,7 +370,7 @@
 
 ;(defn evaluate-query
   ;[app query-context eids]
-  ;(posh/q (:conn app) (:query query-context) eids))
+  ;(posh/q (:query query-context) (:conn app) eids))
 
 ;; Here's more or less how you can do the download in js (from
 ;; http://stackoverflow.com/questions/14964035/how-to-export-javascript-array-info-to-csv-on-client-side)
@@ -419,7 +419,7 @@
     (fn [app eids base-type]
       (let [ordered-paths (ordered-paths @query-context)
             ;; Question: What if conn changes? Compute in inner fn?
-            rows @(posh/q conn (:query @query-context) eids)] 
+            rows @(posh/q (:query @query-context) conn eids)]
         [re-com/v-box
          :gap "15px"
          :children [[re-com/title :level :level2 :label "Table view"]

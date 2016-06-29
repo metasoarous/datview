@@ -1,5 +1,5 @@
 (ns dat.view.routes
-  (:require [bidi.bidi :as bidi]))
+  #?(:cljs (:require [reagent.core :as r])))
 
 
 ;; Defining routes, and any client vs server agnostic functionality
@@ -7,6 +7,9 @@
 ;; Should have some way of pulling routes out of this scenario
 
 (def routes
+  (#?(:clj atom :cljs r/atom) nil))
+
+(reset! routes
   ["/" {"" :index
         ;; uber generix
         ["entity/" [#"\d+" :db/id]] {"/view" :view-entity

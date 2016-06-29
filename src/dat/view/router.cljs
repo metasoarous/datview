@@ -45,6 +45,9 @@
   ;; If we put this in here, for the API we have to somenow let you add your own route customizations... XXX
   (dispatcher/dispatch! (:dispatcher app) [::path-change js/window.location.pathname]))
 
+
+;;
+
 (reactor/register-handler ::path-change
   (fn [app db [_ new-path]]
     (reactor/resolve-to app db [[:dat.view.settings/update [::current-path new-path]]])))
@@ -61,7 +64,8 @@
     (fn [app]
       (reaction
         ;; Actually... :dat.sync/route should maybe just be its own ident...
-        (bidi/match-route (utils/deref-or-value (::routes app)) @(settings/get-setting app ::current-path))))))
+        (bidi/match-route (utils/deref-or-value (:routes app))
+                          (or @(settings/get-setting app ::current-path)) "/")))))
 
 
 ;; XXX Should probably handle this through a handler... but for now...

@@ -8,7 +8,7 @@
             [dat.view.utils :as utils]
             [dat.spec.protocols :as protocols]
             [datascript.core :as d]
-            [posh.core :as posh]
+            [posh.reagent :as posh]
             [reagent.core :as r]
             [reagent.ratom :as ratom]
             [re-com.core :as re-com]
@@ -23,7 +23,9 @@
             [cljs.pprint :as pp]
             [cljs.core.match :as match :refer-macros [match]]
             [markdown.core :as md]
-            [dat.view.query :as query]))
+            [dat.view.query :as query]
+            [dat.view.routes :as routes]
+            [dat.view.settings :as settings]))
 
 
 
@@ -735,11 +737,11 @@
     ;; XXX value arg should be safe as a reaction here
    (let [;options @(attribute-signature-reaction app attr-ident)]
          options (->>
-                   @(posh/q (:conn app)
-                            '[:find [(pull ?eid [*]) ...]
+                   @(posh/q '[:find [(pull ?eid [*]) ...]
                               :in $ ?attr
                               :where [?attr :attribute.ref/types ?type]
                               [?eid :e/type ?type]]
+                            (:conn app)
                             [:db/ident attr-ident])
                    ;; XXX Oh... should we call entity-name entity-label? Since we're really using as the label
                    ;; here?
@@ -998,7 +1000,7 @@
     ;; XXX Need to add sorting functionality here...
     (fn [app context pull-expr eid attr-ident value]
       ;; Ug... can't get around having to duplicate :field and label-view
-      (when (and @(posh/q (:conn app) '[:find ?eid :in $ ?eid :where [?eid]])
+      (when (and @(posh/q '[:find ?eid :in $ ?eid :where [?eid]] (:conn app))
                  (not (:attribute/hidden? @config)))
         (let [type-idents (:attribute.ref/types @attr-sig)]
           ;; Are controls still separated this way? Should they be? XXX
@@ -1121,7 +1123,7 @@
 
 (defn edit-entity-form
   [app remote-eid]
-  (if-let [eid @(posh/q (:conn app) '[:find ?e . :in $ ?remote-eid :where [?e :datsync.remote.db/id ?remote-eid]] remote-eid)]
+  (if-let [eid @(posh/q '[:find ?e . :in $ ?remote-eid :where [?e :datsync.remote.db/id ?remote-eid]] (:conn app) remote-eid)]
     [re-com/v-box :children [[pull-data-form app eid]]]
     [loading-notification "Please wait; form data is loading."]))
 
@@ -1243,6 +1245,7 @@
   ;;  The public API: these two attributes
   [conn   ;; You can access this for your posh queries; based on reactor unless otherwise specified
    config ;; How you control the instantiation of Datview; options:
+   routes ;; Bidi routes data (will abstract more eventually)
    ;; * :datascript/schema
    ;; * :dat.view/conn
    ;; Other (semi-)optional dependencies
@@ -1259,13 +1262,16 @@
             ;; Should try switching to r/atom
             ;conn (or conn (::conn config) (r/atom (d/empty-db base-schema)))
             conn (or conn (::conn config) (d/create-conn base-schema))
+            routes (or routes (::routes config) routes/routes) ;; base routes
             main (or main (::main config))
             history (router/make-history)
-            component (assoc component :conn conn :main main :history history)]
+            component (assoc component :conn conn :main main :history history :routes routes)]
         ;; Transact default settings to db
         (d/transact! conn default-settings)
         ;; Start posh
         (posh/posh! conn)
+        ;; Install settings entity
+        (settings/init! component)
         ;; TODO Fire off the router handlers
         (router/attach-history-handler! history (router/make-handler-fn component))
         component)

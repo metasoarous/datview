@@ -1,10 +1,10 @@
 (ns dat.view.router
   (:require [bidi.bidi :as bidi]
             [dat.view.settings :as settings]
-            [dat.reactor.dispatcher :as dispatch]
+            [dat.reactor.dispatcher :as dispatcher]
             [dat.view.routes :as routes]
             [datascript.core :as d]
-            [reagent.core :as r :include-macros true]
+            [reagent.ratom :refer-macros [reaction]]
             [goog.events]
             [dat.reactor :as reactor]
             [dat.view.utils :as utils])
@@ -43,7 +43,7 @@
 (defn update-route!
   [app]
   ;; If we put this in here, for the API we have to somenow let you add your own route customizations... XXX
-  (dispatch/dispatch! (:reactor app) [::path-change js/window.location.pathname]))
+  (dispatcher/dispatch! (:dispatcher app) [::path-change js/window.location.pathname]))
 
 (reactor/register-handler ::path-change
   (fn [app db [_ new-path]]
@@ -56,12 +56,12 @@
     (update-route! app)))
 
 ;; Should rewrite these from app
-(def get-route
+(def current-route
   (memoize
     (fn [app]
-      (r/reaction
+      (reaction
         ;; Actually... :dat.sync/route should maybe just be its own ident...
-        (bidi/match-route (utils/deref-or-value (::routes app)) @(settings/get app ::current-path))))))
+        (bidi/match-route (utils/deref-or-value (::routes app)) @(settings/get-setting app ::current-path))))))
 
 
 ;; XXX Should probably handle this through a handler... but for now...

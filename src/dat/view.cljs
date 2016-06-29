@@ -22,8 +22,8 @@
             [cljs-time.coerce]
             [cljs.pprint :as pp]
             [cljs.core.match :as match :refer-macros [match]]
-    #_[markdown.core :as md]
-      [dat.view.query :as query]))
+            [markdown.core :as md]
+            [dat.view.query :as query]))
 
 
 
@@ -367,8 +367,10 @@
     :else (pr-str pull-data)))
 
 (defn pull-summary-string
-  [app context-data pull-data]
-  (represent app [::pull-summary-string context-data] pull-data))
+  ([app pull-data]
+   (pull-summary-string app {} pull-data))
+  ([app context-data pull-data]
+   (represent app [::pull-summary-string context-data] pull-data)))
 
 
 (defmethod represent :pull-summary-view
@@ -671,7 +673,12 @@
 ;; I've decide to move everything over here, since it will now be assumed that if you want datview, you want it's form functionality
 ;; Not sure if this makes sense or not yet, but it's my running design.
 
-;(declare pull-form)
+;; Holy shit... there's gonna be a lot of work to do here...
+;; Need to rewrite everything in terms of represent
+
+
+(declare pull-form)
+(declare pull-data-form)
 
 (defn cast-value-type
   [value-type-ident str-value]
@@ -736,7 +743,7 @@
                             [:db/ident attr-ident])
                    ;; XXX Oh... should we call entity-name entity-label? Since we're really using as the label
                    ;; here?
-                   (mapv (fn [pull-data] (assoc pull-data :label (pull-summary pull-data)
+                   (mapv (fn [pull-data] (assoc pull-data :label (pull-summary-string app {} pull-data)
                                                           :id (:db/id pull-data))))
                    (sort-by :label))]
      ;; Remove this div; just for debug XXX
@@ -1046,18 +1053,6 @@
              (send-tx! app [[:db.fn/retractEntity eid]])))))
 
 
-;; Let's do a thing where we have
-(defn loading-notification
-  [message]
-  [re-com/v-box
-   :style {:align-items "center"
-           :justify-content "center"}
-   :gap "15px"
-   :children
-   [[re-com/title :label message]
-    [re-com/throbber :size :large]]])
-
-
 (defn pull-expression-context
   [pull-expr]
   ;; Have to get this to recursively pull out metadata from reference attributes, and nest it according to context schema XXX
@@ -1133,11 +1128,11 @@
 
 ;; These are our new goals
 
-;(defn pull-data-form
-;[app pull-expr eid]
-;(if-let [current-data @(posh/pull (:conn app) pull-expr eid)]
-;[re-com/v-box :children [[edit-entity-fieldset app eid]]]
-;[loading-notification "Please wait; loading data."]))
+(defn pull-data-form
+  [app pull-expr eid]
+  (if-let [current-data @(posh/pull (:conn app) pull-expr eid)]
+    [re-com/v-box :children [[edit-entity-form app eid]]]
+    [loading-notification "Please wait; loading data."]))
 
 ;(defn pull-form
 ;[app pull-expr eid])

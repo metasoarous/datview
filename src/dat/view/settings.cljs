@@ -1,6 +1,7 @@
 (ns dat.view.settings
   (:require [datascript.core :as d]
             [dat.reactor :as reactor]
+            [dat.reactor.dispatcher :as dispatcher]
             [posh.core :as posh]))
 
 
@@ -36,9 +37,13 @@
 ;  (let [settings-id @(posh/q conn '[:find ?settings . :where [?settings :db/ident :client/settings]])]
 ;    (d/transact! conn [{:db/id settings-id attr-ident new-value}])))
 
+(defn update-setting
+  [app setting new-value]
+  (dispatcher/dispatch! app [::update [setting new-value]]))
+
 ;; ohh... should have update-settings for bulk single transaction update as well...
 
-(defn get
+(defn get-setting
   ([app setting-ident]
    (posh/q (:conn app) [:find '?x '. :where ['?settings :db/ident :dat.view/settings] ['?settings setting-ident '?x]]))
   ([app]

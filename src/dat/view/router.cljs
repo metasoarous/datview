@@ -1,9 +1,13 @@
 (ns dat.view.router
   (:require [bidi.bidi :as bidi]
             [dat.view.settings :as settings]
+            [dat.reactor.dispatcher :as dispatch]
             [dat.view.routes :as routes]
             [datascript.core :as d]
-            [goog.events])
+            [reagent.core :as r :include-macros true]
+            [goog.events]
+            [dat.reactor :as reactor]
+            [dat.view.utils :as utils])
   (:import [goog.history Html5History EventType]))
 
 
@@ -12,6 +16,8 @@
 
 
 ;; Now we define how to instatiate the history object.
+
+;; TODO Need to make a system component out of this thing
 
 (defn make-history []
   (doto (Html5History.)
@@ -37,21 +43,28 @@
 (defn update-route!
   [app]
   ;; If we put this in here, for the API we have to somenow let you add your own route customizations... XXX
-  (settings/update-setting app :datview/route (bidi/match-route routes/routes js/window.location.pathname)))
+  (dispatch/dispatch! (:reactor app) [::path-change js/window.location.pathname]))
 
+(reactor/register-handler ::path-change
+  (fn [app db [_ new-path]]
+    (reactor/resolve-to app db [[:dat.view.settings/update [::current-path new-path]]])))
 
 (defn make-handler-fn
   [app]
-  (fn [e]
+  (fn [_]
+    ;; Ideally, we'd be albe to extract the new route from the event...
     (update-route! app)))
 
 ;; Should rewrite these from app
-(defn get-route
-  [app]
-  ;; Actually... :datsync/route should maybe just be it's own ident...
-  (:datview/route @(settings/get-settings app)))
+(def get-route
+  (memoize
+    (fn [app]
+      (r/reaction
+        ;; Actually... :dat.sync/route should maybe just be its own ident...
+        (bidi/match-route (utils/deref-or-value (::routes app)) @(settings/get app ::current-path))))))
 
 
+;; XXX Should probably handle this through a handler... but for now...
 (defn set-route!
   [app {:as route :keys [handler route-params]}]
   (let [flattened-params (-> route-params seq flatten)
@@ -61,6 +74,7 @@
         (println "params:" (with-out-str (pr-str flattened-params)))
         (println "path:" path-for-route)
         (js/alert "Hit a bad route: " (pr-str route-params)))
-      (.setToken (:datview/history-obj @(settings/get-settings app))
+      (.setToken (:history app)
                  path-for-route))))
+
 

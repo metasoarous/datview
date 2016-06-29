@@ -22,24 +22,23 @@
             [goog.date.Date]
             [bidi.bidi :as bidi]))
 
-;; This namespace has to be completely rewritten in terms of the new datview; Currently in terms of old.
-;; Though this was actually part of the inspiration for old so hopefully it won't be too bad...
 
 
-;; ## Table views
+;; ## The model, effectively
 
-;; In terms of the data flow, this may be the best written part of the application so far.
-;; The performance here is pretty darn snappy, and it is achieved by really agressively limiting the number of
-;; queries that need to be run to render.
-;; I think this is the brilliance of om-next in emphasizing pull expressions; they're more composable towards
-;; this end
-;; Anyway...
+;; Really, we should be doing this by serializing pull expressions as isComponent entities.
+;; That'll be more correct and extensible.
+;; But I don't have time now to get that right.
 
-;; If we can do something similar with the "base" datview namespace, I think we'll be able to really tackle
-;; the general performance problems...
+;(def pull-expr-schema
+;  {:dat.type/PullExpression {:e/type :e.type/Type}
+;   :dat.sys/pull {:db/valueType :db.type/ref}
+;   :dat.sys.pull/attributes {:db/valueType :db.type/ref}
+;   ;; This just points to other pull expressions
+;   :dat.sys.pull/ref-attributes {:db/valueType :db.type/ref}})
 
 
-;; ### The model, effectively
+;; For now,m we'll just be tracking what attributes have been selected or not, and it will recursively pull from all of those.
 
 ;; As datomic schema, would look roughly like this: But need a better way to transact this stuff in datsync I
 ;; think, since we might not want to actually mark it with remote.db/id
@@ -65,27 +64,20 @@
                                                :db/valueType :db.type/ref}})
 
 
-;; We store our data around a column selector entity
-
-;; I maybe should have been doing this as boolean meta-attributes. That would have been a bit easier...
-;; This solution however makes it possible to have multiple such idents
-;; (or other entities) if we want to have multiple sets of saved attributes.
-;; esaier if we want to provide a few different options, so here it is.
-
-(defn install-table-view-column-selector!
-  "Install the :table.view/column-selector ident locally, so we can manipulate it's
-  :table.view.column.selector/unfolded-types and :table.view.column/attributes attributes"
-  [app]
-  (d/transact! (:conn app) [{:db/id -3
-                             :db/ident :table.view/column-selector}]))
-
-(def column-selector
-  "Simple accessor for the column-selector entity"
-  [:db/ident :table.view/column-selector])
+(defn new-column-selector
+  "Create an entity of type :dat.view.table/ColumnSelector, with attributes attrs merged in."
+  [attrs]
+  (merge {:db/id (d/tempid -1)
+          :e/type ::ColumnSelector}
+         attrs))
 
 (defn selected-columns
-  [app]
+  [app column-selector]
   (posh/pull (:conn app) '[:table.view.column/attributes] column-selector))
+
+
+;; This stuff is for representing the type relation tree, on which we organize the checkboxes for which attributes are selected in the column selector.
+;; Really, this should be merged with the idea of serialized (as entities/datoms) pull expressions as the more standard way of doing things.
 
 (def type-tree-pull-pattern
   '[:db/id :e/type :db/ident :e/name :table.view.column.selector/_unfolded-types :e.type/_isa
@@ -101,40 +93,49 @@
   [app type-id]
   (posh/pull (:conn app) type-tree-pull-pattern type-id))
 
-(defn selected-column-paths
-  ([app base-type-id]
-   (selected-column-paths app base-type-id []))
-  ([app base-type-id base-path]
-   (reaction
-     (let [type-entity @(type-attribute-tree-reaction app base-type-id)
-           selected-attributes (filter :table.view.column/_attributes (:e.type/attributes type-entity))]))))
+;; Not sure what the deal is with this; Must have written and then figured I didn't need it
+;(defn selected-column-paths
+;  ([app base-type-id]
+;   (selected-column-paths app base-type-id []))
+;  ([app base-type-id base-path]
+;   (reaction
+;     (let [type-entity @(type-attribute-tree-reaction app base-type-id)
+;           selected-attributes (filter :table.view.column/_attributes (:e.type/attributes type-entity))]))))
 
 ;; OK; time to actually construct our table data query.
 
 ;; This is going to be recursive.
 ;; For each type level, we should compute the query needed to get all of the immediately selected attributes.
-;; We then recur over the types pointed to by any selected ref attributes
+;; We then recur over the types pointed to by any selected ref attributes.
 ;; As we recur down these types, we hand the recursion the base binding for the entity that it should be bound
 ;; to.
 ;; The variables we wish to fetch our also kept in a mapping of paths to variable names (or vice versa) so
-;; that we can name columns based on their paths
-;; We can't go down each branch separately, but have to in series and reduce into an acculative product.
+;; that we can name columns based on their paths.
+;; We can't go down each branch separately, but have to in series and reduce into an accumulative product.
 
-;; This naming system isn't ideal; it leaves room for duplicates. Should come up with something guaranteed to
-;; come up with unique entries
+;; Again, this naming system isn't ideal; it leaves room for duplicates.
+;; Ideally we be able to have unique entries, via pull serialization, or some such.
+
+
+;; Going to eventually reimplement in terms of pull (at least as an option), but for right now, we iteratively build a table
+
 (defn gen-sym
   [attribute-ident]
   (symbol (str "?" (name attribute-ident) "-" (rand-int 10000000))))
 
 
+;; First some stuff for producing information based on pull data
+
 (defn unfolded-type?
-  ([type-entity]
-   (boolean (seq (:table.view.column.selector/_unfolded-types type-entity)))))
+  ([type-pull-data]
+   (boolean (seq (:table.view.column.selector/_unfolded-types type-pull-data)))))
+
 ;; Should add a second arity to this so it can return a reaction based on ident or eid
 
 (defn selected-attribute?
-  ([attr-entity]
-   (boolean (:table.view.column/_attributes attr-entity))))
+  ([attr-pull-data]
+   (boolean (:table.view.column/_attributes attr-pull-data))))
+
 
 (declare apply-type-to-query)
 
@@ -202,7 +203,7 @@
 
 
 (defn type-folder
-  [app type-entity]
+  [app column-selector type-entity]
   ;; Could do this as pull, but would only want to if we had hooked up smarter query rendering capabilities
   (let [type-id (:db/id type-entity)
         unfolded? (r-unfolded-type? app type-id)]
@@ -211,9 +212,10 @@
        :gap "3px"
        :children [[dat.view/collapse-button
                    @unfolded?
+                   ;; TODO Rewrite in terms of the dispatch
                    (fn [] (d/transact! (:conn app)
                                        [[(if @unfolded? :db/retract :db/add)
-                                         [:db/ident :table.view/column-selector]
+                                         column-selector
                                          :table.view.column.selector/unfolded-types
                                          type-id]]))]
                   [re-com/label :style {:font-weight "bold"} :label (:e/name type-entity)]]])))
@@ -226,7 +228,7 @@
 (defn attribute-column-selector-row
   "The selector for whether a particular attribute should end up in the output data. Seen should be a set of type identities which
   have already been seen to avoid infinite recursion with type reference cycles (overcoats)."
-  ([app attr-entity seen]
+  ([app column-selector attr-entity seen]
    (let [conn (:conn app)
          checked? (posh/pull conn '[:table.view.column/_attributes] (:db/id attr-entity))]
      [re-com/v-box
@@ -237,7 +239,7 @@
                   :children [[re-com/checkbox
                               :model checked?
                               :on-change (fn [checked-now?]
-                                           (d/transact! conn [[(if checked-now? :db/add :db/retract) [:db/ident :table.view/column-selector] :table.view.column/attributes (:db/id attr-entity)]]))]
+                                           (d/transact! conn [[(if checked-now? :db/add :db/retract) column-selector :table.view.column/attributes (:db/id attr-entity)]]))]
                              [re-com/label :label (dat.view/pull-summary attr-entity)]]]
                  (when @checked?
                    ;; Present types for possible expansion
@@ -250,9 +252,9 @@
 (defn attribute-column-selector-rows
   "The rows in a attribute column selector for a table view given a type entity view with nested
   entities for attributes and subtypes."
-  ([app type-id]
-   (attribute-column-selector-rows app type-id #{}))
-  ([app type-id seen]
+  ([app column-selector type-id]
+   (attribute-column-selector-rows app column-selector type-id #{}))
+  ([app column-selector type-id seen]
    (let [type-entity (type-attribute-tree-reaction app type-id)
          unfolded? (r-unfolded-type? app type-id)]
      (fn [_ type-id]
@@ -260,14 +262,14 @@
          (if-not (seen type-eid)
            [re-com/v-box
             :style {:padding-left "10px"}
-            :children [[type-folder app @type-entity]
+            :children [[type-folder app column-selector @type-entity]
                        (when (not @unfolded?)
                          [re-com/v-box
                           ;; First, render the same thing for the subtypes, so their attributes can show up if unfolded
                           :children [[re-com/v-box
                                       :children (for [subtype-id (map :db/id (:e.type/_isa @type-entity))]
                                                   ^{:key subtype-id}
-                                                  [attribute-column-selector-rows app subtype-id (conj seen type-eid)])]
+                                                  [attribute-column-selector-rows app column-selector subtype-id (conj seen type-eid)])]
                                      ;; This is all of the types directly assigned attribute selection rows
                                      [re-com/v-box
                                       :children (for [attr-entity (:e.type/attributes @type-entity)]
@@ -278,7 +280,7 @@
 ;; Build a magical selector for attributes
 (defn attribute-column-selector
   "The top level attribute column selector component; based on type eid or lookup ref (like [:db/ident :e.type/Comment])."
-  [app base-type]
+  [app  column-selector base-type]
   (let [collapse? (r/atom true)]
     (fn [_ base-type]
       [re-com/v-box
@@ -291,16 +293,46 @@
                      :width "300px"
                      :max-height "300px"
                      :style {:overflow-y "scroll"}
-                     :child [attribute-column-selector-rows app (:db/id @(posh/pull (:conn app) '[:db/id] base-type))]])]])))
+                     :child [attribute-column-selector-rows app column-selector (:db/id @(posh/pull (:conn app) '[:db/id] base-type))]])]])))
+
+
+(defmethod dat.view/represent ::row-value-view
+  [app [_ context-data] value]
+  [:td
+   {:style {:padding "4px 8px"}}
+   ;; If here we know in context what the path is to the data, we should pass that along as well
+   (if-let [path (::path context-data)]
+     ;; Then we should have enough info to use :dat.view/value-view
+     ;; XXX Note; this hasn't been tested yet and is probably broken, so dont pass path and use generic for now
+     ;; Also make sure to rewrite with attr-ident in context
+     (let [attr-ident (last path)
+           context-data' (assoc context-data ::path path
+                                             :attribute/ident attr-ident)]
+       [dat.view/represent app [:dat.view/value-view context-data] value])
+     ;; Otherwise, just stringify; This could also maybe be a separate mm dispatch
+     (str value))])
+
+
+;; Context data should have
+(defmethod dat.view/represent ::row-view
+  [app [_ context-data] row]
+  [:tr
+   ;; If here we know in context what the path is to the data, we should pass that along as well
+   (for [[i value] (map-indexed vector row)]
+     (let [path (nth (::paths context-data) i nil)]
+       ^{:key i}
+       [dat.view/represent app [::row-value-view (assoc context-data
+                                                   ;; Shoud be associng in the attr-ident as well
+                                                   ::path path
+                                                   :db.attr/ident (last path)
+                                                   ::row-index i)]]))])
+
 
 (defn entity-row-view
-  [paths row]
-  [:tr
-   (for [[path value] (map vector paths row)]
-     ^{:key (hash path)}
-     [:td
-      {:style {:padding "4px 8px"}}
-      value])])
+  ([app context-data paths row]
+   [dat.view/represent app [::row-view (merge context-data {::paths paths})] row])
+  ([app paths row]
+   [entity-row-view app {} paths row]))
 
 
 (defn path-name
@@ -313,16 +345,25 @@
   [{:as query-context :keys [query sym-mapping]}]
   (mapv sym-mapping (:find query)))
 
-(defn header-view
-  [{:as query-context :keys [query sym-mapping]}]
-  (let [find-syms (:find query)]
+
+;; Again, this is gonna have to totally change once we refactor to accept (and probably prefer) pull
+(defmethod dat.view/represent ::header-view
+  [app [_ context-data] _]
+  (let [[{:keys [query sym-mapping]}] context-data
+        find-syms (:find query)]
     [:tr
      (for [sym find-syms]
        (let [path (sym-mapping sym)]
          ^{:key (hash path)}
+         ;; TODO This should really be based on :dat.view/attr-label
          [:th
           {:style {:padding "8px"}}
           (path-name path)]))]))
+
+
+(defn header-view
+  [app context-data]
+  [dat.view/represent app context-data nil])
 
 
 ;; Writing out results
@@ -352,7 +393,7 @@
        (map (partial map pr-str))
        (csv/write-csv)))
 
-;; XXX Would really like to use papa for this but can't figure out how
+;; XXX Would really like to use the js papa lib for this but can't figure out how to do cljsjs
 ;(println (format-csv [["1,000" "2" "3" "frank,this"] [4 "5,\"000" "6"]]))
 
 (defn download-csv
@@ -364,14 +405,20 @@
         encode-uri (js/encodeURI csv-content)]
     (.open js/window encode-uri)))
 
-(defn table-view
-  [app eids base-type]
-  (let [conn (:conn app)
+
+;; Here we should be able to extend the table view via the context interpretation
+;; But for right now just assuming data is eids
+(defmethod dat.view/represent ::table-view
+  [app [_ context-data] eids]
+  (let [column-selector (::column-selector context-data)
+        base-type (::base-type context-data)
+        conn (:conn app)
         conn-reaction (dat.view/as-reaction conn)
         query-context (type-query-reaction conn-reaction base-type)]
         ;query-results (evaluate-query conn query-context eids)]
-    (fn [_ eids]
+    (fn [app eids base-type]
       (let [ordered-paths (ordered-paths @query-context)
+            ;; Question: What if conn changes? Compute in inner fn?
             rows @(posh/q conn (:query @query-context) eids)] 
         [re-com/v-box
          :gap "15px"
@@ -382,12 +429,24 @@
                                  :md-icon-name "zmdi-download"
                                  :tooltip "Download table as CSV"
                                  :on-click (partial download-csv ordered-paths rows)]
-                                [attribute-column-selector app base-type]]]
+                                [attribute-column-selector app column-selector base-type]]]
                     [:table
                      [:tbody
                       [header-view @query-context]
-                      (for [row rows]
+                      (for [row (distinct rows)]
                         ^{:key (hash row)}
-                        [entity-row-view ordered-paths row])]]]]))))
+                        [dat.view/represent app [::row-view context-data] row])]]]]))))
+                        ;[entity-row-view ordered-paths row])]]]]))))
 
+
+;; This is more or less deprecated and going to be rewritten, so don't build on it for now.
+;; Backwards compatibility
+(defn table-view
+  ;; Should generate a column-selector from
+  [app column-selector base-type eids]
+  (dat.view/represent app
+                      [::table-view {::mode ::eids}
+                                    ::base-type base-type
+                                    ::column-selector column-selector]
+                      eids))
 

@@ -4,6 +4,7 @@
                    [cljs.core.async.macros :as async-macros :refer [go go-loop]])
   (:require [dat.reactor :as reactor]
             [dat.reactor.dispatcher :as dispatcher]
+            [dat.view.representation :as representation]
             [dat.view.router :as router]
             [dat.view.utils :as utils]
             [dat.spec.protocols :as protocols]
@@ -36,10 +37,23 @@
 ;; This is really the cornerstone of all of dat.view
 ;; This multimethod represents the abstract ability to render/represent something based on abstract context
 
-;; Commenting out because moving to it's own namespace
-;(defmulti represent
-;  (fn [app [context-id context-data] data]
-;    context-id))
+(def represent
+  "Maps args `[app context data]` to a representation (hiccup, most likely) as dispatched by (first context). Representations can
+  be added via register-representation.
+
+  Note: State is currently in a var in dat.view.representation; There will maybe eventually be a default such, but it
+  would be good to make it possible to not do that."
+  representation/represent)
+
+(def register-representation
+  "Registers a representation function (maping of args args `[app context data]` to a view representation) for a given
+  context-id (the first value of `context := [context-id context-data]`). as dispatched by (first context). Representations can
+  be added via register-representation.
+
+  Note: State is currently in a var in dat.view.representation; There will maybe eventually be a default such, but it
+  would be good to manage the state yourself."
+  representation/register-representation)
+
 
 
 ;; ## Events

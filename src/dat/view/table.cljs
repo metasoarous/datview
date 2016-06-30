@@ -5,6 +5,7 @@
   (:require [dat.view :as dat.view]
             [dat.view.router :as router]
             [dat.view.settings :as settings]
+            [dat.view.representation :as representation]
             [cljs-time.core :as cljs-time]
             [cljs-time.format]
             [cljs-time.coerce]

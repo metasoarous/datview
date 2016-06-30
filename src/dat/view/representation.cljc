@@ -1,7 +1,7 @@
 (ns dat.view.representation
   (:require
-    #?@(:clj [reagent.core :as r]
-             [reagent.ratom :refer-macros [reaction]])
+    #?(:cljs [reagent.core :as r])
+    #?(:cljs [reagent.ratom :refer-macros [reaction]])
     [taoensso.timbre :as log]))
 
 
@@ -16,14 +16,14 @@
   [represent* app context data])
 
 
-;; Evil global mutable state!
+;; TODO Replace evil global mutable state with local values!
 (def registrations
   (#?(:cljs r/atom :clj atom) {}))
 
-(def reactively-register
+(defn reactively-register
   "Representation middleware: *Should* make it so that when we update representations on the client, they update in the views."
   [context-id representation-fn]
-  (swap! assoc registrations context-id representation-fn)
+  (swap! registrations assoc context-id representation-fn)
   (let [registration-reaction #?(:cljs (reaction (get @registrations context-id))
                                  :clj registrations)]
     (fn [app context data]
@@ -45,5 +45,7 @@
        (representation-fn' app context data))))
   ([context-id representation-fn]
    (register-representation context-id [] representation-fn)))
+
+
 
 

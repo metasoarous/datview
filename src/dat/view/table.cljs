@@ -298,8 +298,7 @@
 
 (defmethod dat.view/represent ::row-value-view
   [app [_ context-data] value]
-  [:td
-   {:style {:padding "4px 8px"}}
+  [:td {:style {:padding "4px 8px"}}
    ;; If here we know in context what the path is to the data, we should pass that along as well
    (if-let [path (::path context-data)]
      ;; Then we should have enough info to use :dat.view/value-view
@@ -308,7 +307,7 @@
      (let [attr-ident (last path)
            context-data' (assoc context-data ::path path
                                              :attribute/ident attr-ident)]
-       [dat.view/represent app [:dat.view/value-view context-data] value])
+       [dat.view/represent app [:dat.view/value-view context-data'] value])
      ;; Otherwise, just stringify; This could also maybe be a separate mm dispatch
      (str value))])
 

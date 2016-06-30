@@ -36,9 +36,10 @@
 ;; This is really the cornerstone of all of dat.view
 ;; This multimethod represents the abstract ability to render/represent something based on abstract context
 
-(defmulti represent
-  (fn [app [context-id context-data] data]
-    context-id))
+;; Commenting out because moving to it's own namespace
+;(defmulti represent
+;  (fn [app [context-id context-data] data]
+;    context-id))
 
 
 ;; ## Events

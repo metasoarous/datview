@@ -50,10 +50,11 @@
     (fn safe-pull*
       ([conn pull-expr id default]
        (reaction
-        (try
-          @(posh/pull conn pull-expr default)
-          (catch :default e
-            default))))
+         (try
+           @(posh/pull conn pull-expr default)
+           (catch :default e
+             (try @(dat.view/as-reaction conn) (catch :default e))
+             default))))
       ([conn pull-expr id]
        (safe-pull* conn pull-expr id nil)))))
 

@@ -21,13 +21,15 @@
 
 
 (defn register-representation
-  [context-id middleware representation-fn]
-  (let [middleware-fn (apply comp middleware)
-        representation-fn' (middleware-fn representation-fn)]
-    (swap! registrations assoc context-id representation-fn')
-    (defmethod represent* context-id
-      [app context data]
-      (log/debug "Trying to deref")
-      (representation-fn' app context data))))
+  ([context-id middleware representation-fn]
+   (let [middleware-fn (apply comp middleware)
+         representation-fn' (middleware-fn representation-fn)]
+     (swap! registrations assoc context-id representation-fn')
+     (defmethod represent* context-id
+       [app context data]
+       (log/debug "Trying to deref")
+       (representation-fn' app context data))))
+  ([context-id representation-fn]
+   (register-representation context-id [] representation-fn)))
 
 

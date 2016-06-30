@@ -296,35 +296,37 @@
                      :child [attribute-column-selector-rows app column-selector (:db/id @(posh/pull (:conn app) '[:db/id] base-type))]])]])))
 
 
-(defmethod dat.view/represent ::row-value-view
-  [app [_ context-data] value]
-  [:td {:style {:padding "4px 8px"}}
-   ;; If here we know in context what the path is to the data, we should pass that along as well
-   (if-let [path (::path context-data)]
-     ;; Then we should have enough info to use :dat.view/value-view
-     ;; XXX Note; this hasn't been tested yet and is probably broken, so dont pass path and use generic for now
-     ;; Also make sure to rewrite with attr-ident in context
-     (let [attr-ident (last path)
-           context-data' (assoc context-data ::path path
-                                             :attribute/ident attr-ident)]
-       [dat.view/represent app [:dat.view/value-view context-data'] value])
-     ;; Otherwise, just stringify; This could also maybe be a separate mm dispatch
-     (str value))])
+(representation/register-representation
+  ::row-value-view
+  (fn [app [_ context-data] value]
+    [:td {:style {:padding "4px 8px"}}
+     ;; If here we know in context what the path is to the data, we should pass that along as well
+     (if-let [path (::path context-data)]
+       ;; Then we should have enough info to use :dat.view/value-view
+       ;; XXX Note; this hasn't been tested yet and is probably broken, so dont pass path and use generic for now
+       ;; Also make sure to rewrite with attr-ident in context
+       (let [attr-ident (last path)
+             context-data' (assoc context-data ::path path
+                                               :attribute/ident attr-ident)]
+         [dat.view/represent app [:dat.view/value-view context-data'] value])
+       ;; Otherwise, just stringify; This could also maybe be a separate mm dispatch
+       (str value))]))
 
 
 ;; Context data should have
-(defmethod dat.view/represent ::row-view
-  [app [_ context-data] row]
-  [:tr
-   ;; If here we know in context what the path is to the data, we should pass that along as well
-   (for [[i value] (map-indexed vector row)]
-     (let [path (nth (::paths context-data) i nil)]
-       ^{:key i}
-       [dat.view/represent app [::row-value-view (assoc context-data
-                                                   ;; Shoud be associng in the attr-ident as well
-                                                   ::path path
-                                                   :db.attr/ident (last path)
-                                                   ::row-index i)]]))])
+(representation/register-representation
+  ::row-view
+  (fn [app [_ context-data] row]
+    [:tr
+     ;; If here we know in context what the path is to the data, we should pass that along as well
+     (for [[i value] (map-indexed vector row)]
+       (let [path (nth (::paths context-data) i nil)]
+         ^{:key i}
+         [dat.view/represent app [::row-value-view (assoc context-data
+                                                     ;; Shoud be associng in the attr-ident as well
+                                                     ::path path
+                                                     :db.attr/ident (last path)
+                                                     ::row-index i)]]))]))
 
 
 (defn entity-row-view
@@ -346,18 +348,19 @@
 
 
 ;; Again, this is gonna have to totally change once we refactor to accept (and probably prefer) pull
-(defmethod dat.view/represent ::header-view
-  [app [_ context-data] _]
-  (let [[{:keys [query sym-mapping]}] context-data
-        find-syms (:find query)]
-    [:tr
-     (for [sym find-syms]
-       (let [path (sym-mapping sym)]
-         ^{:key (hash path)}
-         ;; TODO This should really be based on :dat.view/attr-label
-         [:th
-          {:style {:padding "8px"}}
-          (path-name path)]))]))
+(representation/register-representation
+  ::header-view
+  (fn [app [_ context-data] _]
+    (let [[{:keys [query sym-mapping]}] context-data
+          find-syms (:find query)]
+      [:tr
+       (for [sym find-syms]
+         (let [path (sym-mapping sym)]
+           ^{:key (hash path)}
+           ;; TODO This should really be based on :dat.view/attr-label
+           [:th
+            {:style {:padding "8px"}}
+            (path-name path)]))])))
 
 
 (defn header-view
@@ -407,35 +410,36 @@
 
 ;; Here we should be able to extend the table view via the context interpretation
 ;; But for right now just assuming data is eids
-(defmethod dat.view/represent ::table-view
-  [app [_ context-data] eids]
-  (let [column-selector (::column-selector context-data)
-        base-type (::base-type context-data)
-        conn (:conn app)
-        conn-reaction (dat.view/as-reaction conn)
-        query-context (type-query-reaction conn-reaction base-type)]
-        ;query-results (evaluate-query conn query-context eids)]
-    (fn [app eids base-type]
-      (let [ordered-paths (ordered-paths @query-context)
-            ;; Question: What if conn changes? Compute in inner fn?
-            rows @(posh/q (:query @query-context) conn eids)]
-        [re-com/v-box
-         :gap "15px"
-         :children [[re-com/title :level :level2 :label "Table view"]
-                    [re-com/h-box
-                     :gap "20px"
-                     :children [[re-com/md-icon-button
-                                 :md-icon-name "zmdi-download"
-                                 :tooltip "Download table as CSV"
-                                 :on-click (partial download-csv ordered-paths rows)]
-                                [attribute-column-selector app column-selector base-type]]]
-                    [:table
-                     [:tbody
-                      [header-view @query-context]
-                      (for [row (distinct rows)]
-                        ^{:key (hash row)}
-                        [dat.view/represent app [::row-view context-data] row])]]]]))))
-                        ;[entity-row-view ordered-paths row])]]]]))))
+(representation/register-representation
+  ::table-view
+  (fn [app [_ context-data] eids]
+    (let [column-selector (::column-selector context-data)
+          base-type (::base-type context-data)
+          conn (:conn app)
+          conn-reaction (dat.view/as-reaction conn)
+          query-context (type-query-reaction conn-reaction base-type)]
+          ;query-results (evaluate-query conn query-context eids)]
+      (fn [app eids base-type]
+        (let [ordered-paths (ordered-paths @query-context)
+              ;; Question: What if conn changes? Compute in inner fn?
+              rows @(posh/q (:query @query-context) conn eids)]
+          [re-com/v-box
+           :gap "15px"
+           :children [[re-com/title :level :level2 :label "Table view"]
+                      [re-com/h-box
+                       :gap "20px"
+                       :children [[re-com/md-icon-button
+                                   :md-icon-name "zmdi-download"
+                                   :tooltip "Download table as CSV"
+                                   :on-click (partial download-csv ordered-paths rows)]
+                                  [attribute-column-selector app column-selector base-type]]]
+                      [:table
+                       [:tbody
+                        [header-view @query-context]
+                        (for [row (distinct rows)]
+                          ^{:key (hash row)}
+                          [dat.view/represent app [::row-view context-data] row])]]]])))))
+                          ;[entity-row-view ordered-paths row])]]]]))))
 
 
 ;; This is more or less deprecated and going to be rewritten, so don't build on it for now.

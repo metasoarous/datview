@@ -360,14 +360,15 @@
 ;; These should be accessible for wrapping, and should be overridable/extensible via correspondingly named keys of the context map at various entry points
 
 
-(defmethod represent ::pull-summary-string
-  [_ _ pull-data]
-  (match [pull-data]
-    [{:e/name name}] name
-    [{:e/type {:db/ident type-ident}}] (name type-ident)
-    [{:attribute/label label}] label
-    ;; A terrible assumption really, but fine enough for now
-    :else (pr-str pull-data)))
+(representation/register-representation
+  ::pull-summary-string
+  (fn [_ _ pull-data]
+    (match [pull-data]
+      [{:e/name name}] name
+      [{:e/type {:db/ident type-ident}}] (name type-ident)
+      [{:attribute/label label}] label
+      ;; A terrible assumption really, but fine enough for now
+      :else (pr-str pull-data))))
 
 (defn pull-summary-string
   ([app pull-data]
@@ -376,26 +377,28 @@
    (represent app [::pull-summary-string context-data] pull-data)))
 
 
-(defmethod represent :pull-summary-view
-  [app [_ context-data] pull-data]
-  [:div {:style {:font-weight "bold" :padding "5px"}}
-   (represent app [::pull-summary context-data] pull-data)])
+(representation/register-representation
+  :pull-summary-view
+  (fn [app [_ context-data] pull-data]
+    [:div {:style {:font-weight "bold" :padding "5px"}}
+     (represent app [::pull-summary context-data] pull-data)]))
 
 (defn pull-summary-view
   [app context-data pull-data]
   (represent app [::pull-summary-view context-data] pull-data))
 
 
-(defmethod represent ::collapse-summary
-  [app [_ context-data] values]
-  ;; XXX Need to stylyze and take out of re-com styling
-  [:div {:style (merge v-box-styles
-                       {:padding "10px"})}
-                        ;:align :end
-                        ;:gap "20px"
-   (for [value (distinct values)]
-     ^{:key (hash value)}
-     [pull-summary-view app context-data value])])
+(representation/register-representation
+  ::collapse-summary
+  (fn [app [_ context-data] values]
+    ;; XXX Need to stylyze and take out of re-com styling
+    [:div {:style (merge v-box-styles
+                         {:padding "10px"})}
+                          ;:align :end
+                          ;:gap "20px"
+     (for [value (distinct values)]
+       ^{:key (hash value)}
+       [pull-summary-view app context-data value])]))
 
 (defn collapse-summary
   [app context-data values]
@@ -414,16 +417,17 @@
     (clojure.string/join " " (concat [(clojure.string/capitalize x)] xs))))
 
 
-(defmethod represent ::label-view
-  [app _ attr-ident]
-  (when attr-ident
-    [re-com/label
-     :style {:font-size "14px"
-             :font-weight "bold"}
-     :label
-     ;; XXX Again, should be pull-based
-     (or (:attribute/label @(posh/pull (:conn app) [:attribute/label] [:db/ident attr-ident]))
-         (lablify-attr-ident attr-ident))]))
+(representation/register-representation
+  ::label-view
+  (fn [app _ attr-ident]
+    (when attr-ident
+      [re-com/label
+       :style {:font-size "14px"
+               :font-weight "bold"}
+       :label
+       ;; XXX Again, should be pull-based
+       (or (:attribute/label @(posh/pull (:conn app) [:attribute/label] [:db/ident attr-ident]))
+           (lablify-attr-ident attr-ident))])))
 
 (defn label-view
   "For a given attr-ident, render a label for that attribute."
@@ -455,25 +459,27 @@
 
 ;; Still need to hook up with customized context
 
-(defmethod represent ::copy-entity-control
-  [app [_ context-data] pull-data]
-  (let [pull-data (utils/deref-or-value pull-data)]
-    ;; TODO Need to figure out the right way to configure the re-com components
-    [re-com/md-icon-button :md-icon-name "zmdi-copy"
-     :size :smaller
-     :style {:margin-right "10px"}
-     :tooltip "Copy entity" ;; XXX Should make tooltip fn-able
-     :on-click (fn [] (js/alert "Coming soon to a database application near you"))]))
+(representation/register-representation
+  ::copy-entity-control
+  (fn [app [_ context-data] pull-data]
+    (let [pull-data (utils/deref-or-value pull-data)]
+      ;; TODO Need to figure out the right way to configure the re-com components
+      [re-com/md-icon-button :md-icon-name "zmdi-copy"
+       :size :smaller
+       :style {:margin-right "10px"}
+       :tooltip "Copy entity" ;; XXX Should make tooltip fn-able
+       :on-click (fn [] (js/alert "Coming soon to a database application near you"))])))
 
-(defmethod represent ::edit-entity-control
-  [app [_ context-data] pull-data]
-  (let [pull-data (utils/deref-or-value pull-data)]
-    [re-com/md-icon-button :md-icon-name "zmdi-edit"
-     :style {:margin-right "10px"}
-     :size :smaller
-     :tooltip "Edit entity"
-     ;; This assumes the pull has :dat.sync.remote.db/id... automate?
-     :on-click (fn [] (router/set-route! app {:handler :edit-entity :route-params {:db/id (:dat.sync.remote.db/id pull-data)}}))]))
+(representation/register-representation
+  ::edit-entity-control
+  (fn [app [_ context-data] pull-data]
+    (let [pull-data (utils/deref-or-value pull-data)]
+      [re-com/md-icon-button :md-icon-name "zmdi-edit"
+       :style {:margin-right "10px"}
+       :size :smaller
+       :tooltip "Edit entity"
+       ;; This assumes the pull has :dat.sync.remote.db/id... automate?
+       :on-click (fn [] (router/set-route! app {:handler :edit-entity :route-params {:db/id (:dat.sync.remote.db/id pull-data)}}))])))
 
 
 ;; TODO Need a way to figure out which controls are needed for a given component
@@ -482,14 +488,15 @@
   ;; For now..
   (::controls context-data))
 
-(defmethod represent ::control-set
-  [app [_ context-data] data]
-  (let [context-data (component-context app ::control-set {::locals context-data})]
-    ;; XXX This was ::pull-view-controls, now ::control-set
-    [:div (:dom/attrs @(component-context app ::pull-view-controls {::locals context-data}))
-     (for [control-id (distinct (component-controls context-data))]
-       ^{:key (hash control-id)}
-       [represent app [control-id context-data] data])]))
+(representation/register-representation
+  ::control-set
+  (fn [app [_ context-data] data]
+    (let [context-data (component-context app ::control-set {::locals context-data})]
+      ;; XXX This was ::pull-view-controls, now ::control-set
+      [:div (:dom/attrs @(component-context app ::pull-view-controls {::locals context-data}))
+       (for [control-id (distinct (component-controls context-data))]
+         ^{:key (hash control-id)}
+         [represent app [control-id context-data] data])])))
 
 
 
@@ -508,23 +515,24 @@
 ;; If not present, should just default.
 ;; Maybe slightly less than ideal for refs, but still valueable I think.
 ;; Attr ident is really just context, which we may or may not need.
-(defmethod represent ::value-view
+(representation/register-representation
+  ::value-view
   ;; QUESTION Should attr-ident be part of the context-data?
-  [app [_ context-data] value]
-  (let [attr-ident (:db.attr/ident context-data)
-        attr-sig @(attribute-signature-reaction app attr-ident)
-        context @(component-context app ::value-view {::locals context-data})]
-    [:div (:dom/attrs context)
-     ;[debug "Here is the comp-attrs:" attr-sig]
-     (match [attr-sig]
-       ;; For now, all refs render the same; May treat component vs non-comp separately later
-       [{:db/valueType :db.type/ref}]
-       (let [nested-context (assoc context-data ::pull-expr (get-nested-pull-expr (::pull-expr context-data) attr-ident))]
-         ;; QUESTION: Where should the nsted pull-expr go?
-         [represent app nested-context value])
-       ;; Miscellaneous value
-       :else
-       (str value))]))
+  (fn [app [_ context-data] value]
+    (let [attr-ident (:db.attr/ident context-data)
+          attr-sig @(attribute-signature-reaction app attr-ident)
+          context @(component-context app ::value-view {::locals context-data})]
+      [:div (:dom/attrs context)
+       ;[debug "Here is the comp-attrs:" attr-sig]
+       (match [attr-sig]
+         ;; For now, all refs render the same; May treat component vs non-comp separately later
+         [{:db/valueType :db.type/ref}]
+         (let [nested-context (assoc context-data ::pull-expr (get-nested-pull-expr (::pull-expr context-data) attr-ident))]
+           ;; QUESTION: Where should the nsted pull-expr go?
+           [represent app nested-context value])
+         ;; Miscellaneous value
+         :else
+         (str value))])))
 
 
 ;; TODO Need to figure out the signature here
@@ -536,24 +544,25 @@
 ;; Should we have a macro for building these components and dealing with all the state in the context? Did the merge for you?
 ;(defn build-view-component)
 
-(defmethod represent ::attr-values-view
-  [app [_ context-data] values]
-  (let [pull-expr (::pull-expr context-data)
-        context @(component-context app ::attr-values-view {::locals (meta pull-expr)})
-        ;; Should put all of the collapsed values in something we can serialize, so we always know what's collapsed
-        collapse-attribute? (r/atom (:dat.view.collapse/default context))]
-    (fn [app [_ context-data] values]
-      (let [collapsable? (:dat.view.collapse/collapsable? context)]
-        [:div (:dom/attrs context)
-         (when collapsable?
-           [collapse-button collapse-attribute?])
-         (when @collapse-attribute?
-           [collapse-summary app context values])
-         ;(defn pull-summary-view [app pull-expr pull-data]
-         (when (or (not collapsable?) (and collapsable? (not @collapse-attribute?)))
-           (for [value (utils/deref-or-value values)]
-             ^{:key (hash value)}
-             [represent app context-data value]))]))))
+(representation/register-representation
+  ::attr-values-view
+  (fn [app [_ context-data] values]
+    (let [pull-expr (::pull-expr context-data)
+          context @(component-context app ::attr-values-view {::locals (meta pull-expr)})
+          ;; Should put all of the collapsed values in something we can serialize, so we always know what's collapsed
+          collapse-attribute? (r/atom (:dat.view.collapse/default context))]
+      (fn [app [_ context-data] values]
+        (let [collapsable? (:dat.view.collapse/collapsable? context)]
+          [:div (:dom/attrs context)
+           (when collapsable?
+             [collapse-button collapse-attribute?])
+           (when @collapse-attribute?
+             [collapse-summary app context values])
+           ;(defn pull-summary-view [app pull-expr pull-data]
+           (when (or (not collapsable?) (and collapsable? (not @collapse-attribute?)))
+             (for [value (utils/deref-or-value values)]
+               ^{:key (hash value)}
+               [represent app context-data value]))])))))
 
 
 ;(defn attr-values-view
@@ -561,17 +570,18 @@
 
 
 ;; Need to have controls etc here
-(defmethod represent ::attr-view
-  [app [_ context-data] values]
-  (let [attr-ident (:db.attr/ident context-data)]
-    [:div (:dom/attrs @(component-context app ::attr-view {:dat.view/locals context-data}))
-    ;[:div @(attribute-context app (meta pull-expr) :attr-view)
-     [label-view app attr-ident]
-     (match [@(attribute-signature-reaction app attr-ident)]
-       [{:db/cardinality :db.cardinality/many}]
-       [represent app [::attr-values-view context-data] [attr-ident values]]
-       :else
-       [represent app [::value-view context-data] [attr-ident values]])]))
+(representation/register-representation
+  ::attr-view
+  (fn [app [_ context-data] values]
+    (let [attr-ident (:db.attr/ident context-data)]
+      [:div (:dom/attrs @(component-context app ::attr-view {:dat.view/locals context-data}))
+      ;[:div @(attribute-context app (meta pull-expr) :attr-view)
+       [label-view app attr-ident]
+       (match [@(attribute-signature-reaction app attr-ident)]
+         [{:db/cardinality :db.cardinality/many}]
+         [represent app [::attr-values-view context-data] [attr-ident values]]
+         :else
+         [represent app [::value-view context-data] [attr-ident values]])])))
 
 
 ;(defn attr-view
@@ -600,28 +610,30 @@
    (pull-attributes pull-expr [])))
 
 
-(defmethod represent ::pull-data-view
-  [app [_ context-data] pull-data]
-  ;; Annoying to have to do this
-  (let [context @(component-context app ::pull-data-view {:dat.view/locals context-data})
-        pull-expr (::pull-expr context)
-        pull-data (utils/deref-or-value pull-data)]
-    [:div (:dom/attrs context)
-     [:div
-       [represent app [::control-set context-data] pull-data]
-       [:div {:style (merge h-box-styles)}
-        [represent app [::pull-summary-view context-data] pull-data]]]
-     ;; XXX TODO Questions:
-     ;; Need a react-id function that lets us repeat attrs when needed
-     (for [attr-ident (distinct (pull-attributes pull-expr pull-data))]
-       ^{:key (hash attr-ident)}
-       [represent app [::attr-view context-data] [attr-ident (get pull-data attr-ident)]])]))
+(representation/register-representation
+  ::pull-data-view
+  (fn [app [_ context-data] pull-data]
+    ;; Annoying to have to do this
+    (let [context @(component-context app ::pull-data-view {:dat.view/locals context-data})
+          pull-expr (::pull-expr context)
+          pull-data (utils/deref-or-value pull-data)]
+      [:div (:dom/attrs context)
+       [:div
+         [represent app [::control-set context-data] pull-data]
+         [:div {:style (merge h-box-styles)}
+          [represent app [::pull-summary-view context-data] pull-data]]]
+       ;; XXX TODO Questions:
+       ;; Need a react-id function that lets us repeat attrs when needed
+       (for [attr-ident (distinct (pull-attributes pull-expr pull-data))]
+         ^{:key (hash attr-ident)}
+         [represent app [::attr-view context-data] [attr-ident (get pull-data attr-ident)]])])))
 
 
-(defmethod represent ::pull-view
-  [app [_ context-data] [pull-expr eid]]
-  (let [pull-data (posh/pull (:conn app) pull-expr eid)]
-    [represent app [::pull-data-view (assoc context-data ::pull-expr pull-expr)] pull-data]))
+(representation/register-representation
+  ::pull-view
+  (fn [app [_ context-data] [pull-expr eid]]
+    (let [pull-data (posh/pull (:conn app) pull-expr eid)]
+      [represent app [::pull-data-view (assoc context-data ::pull-expr pull-expr)] pull-data])))
 
 
 (defn pull-data-view

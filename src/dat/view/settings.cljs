@@ -25,7 +25,7 @@
     (d/transact! (:conn app) tx)))
 
 
-;; We should just be registering transaction functions
+;; TODO We should just be registering transaction functions
 
 (reactor/register-handler ::update
   (fn [app db [_ [setting-ident setting-value]]]

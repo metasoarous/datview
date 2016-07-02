@@ -67,7 +67,7 @@
 
 (s/def ::event (s/and vector? (s/cat :event-id  ::event-id
                                      :event-data (constantly true))))
-                                    
+
 (s/def ::conn d/conn?)
 
 (s/def ::dispatcher #(satisfies? protocols/PDispatcher %))
@@ -168,11 +168,25 @@
 
 (defn debug
   ([message data]
-   [:div.debug 
+   [:div.debug
     [:p message]
     [:pre (debug-str data)]])
   ([data]
    (debug "" data)))
+
+
+
+;; Default view when a representation can't be found
+
+
+(register-representation
+  :default
+  (fn [_ context data]
+    [:div
+     [:h4 "No representation for:"]
+     [debug "context:" context]
+     [debug "data:" data]]))
+
 
 
 
@@ -266,6 +280,7 @@
         (posh/pull (:conn app)
                    '[* {:db/valueType [:db/ident]
                         :db/cardinality [:db/ident]
+                        :db/unique [:db/ident]
                         :attribute.ref/types [:db/ident]}]
                    [:db/ident attr-ident])))))
 
@@ -304,15 +319,15 @@
       ([app component-id {;; Options, in order of precedence in consequent merging
                           :keys [dat.view/locals ;; points to local overrides; highest precedence
                                  ;; When the component is in a scope closed over by some particular attribute:
-                                 dat.view/attr]}] ;; db/ident of the attribute; precedence below locals
+                                 db.attr/ident]}] ;; db/ident of the attribute; precedence below locals
        (reaction
          (let [merged (utils/deep-merge @(component-context app) (utils/deref-or-value locals))]
-           (if attr
-             (let [attr-sig @(attribute-signature-reaction app attr)]
+           (if ident
+             (let [attr-sig @(attribute-signature-reaction app ident)]
                (utils/deep-merge (get-in merged [::base-config component-id])
                                  (get-in merged [::card-config (:db/cardinality attr-sig) component-id])
                                  (get-in merged [::value-type-config (:db/valueType attr-sig) component-id])
-                                 (get-in merged [::attr-config attr component-id])))
+                                 (get-in merged [::attr-config ident])))
              ;; Need to also get the value type and card config by the attr-config if that's all that's present; Shouldn't ever
              ;; really need to pass in manually XXX
              (get-in merged [::base-config component-id]))))))))
@@ -377,12 +392,13 @@
 (representation/register-representation
   ::pull-summary-string
   (fn [_ _ pull-data]
-    (match [pull-data]
-      [{:e/name name}] name
-      [{:e/type {:db/ident type-ident}}] (name type-ident)
-      [{:attribute/label label}] label
-      ;; A terrible assumption really, but fine enough for now
-      :else (pr-str pull-data))))
+    [:span
+     (match [pull-data]
+       [{:e/name name}] name
+       [{:e/type {:db/ident type-ident}}] (name type-ident)
+       [{:attribute/label label}] label
+       ;; A terrible assumption really, but fine enough for now
+       :else (pr-str pull-data))]))
 
 (defn pull-summary-string
   ([app pull-data]
@@ -392,10 +408,10 @@
 
 
 (representation/register-representation
-  :pull-summary-view
+  ::pull-summary-view
   (fn [app [_ context-data] pull-data]
     [:div {:style {:font-weight "bold" :padding "5px"}}
-     (represent app [::pull-summary context-data] pull-data)]))
+     [represent app [::pull-summary-string context-data] pull-data]]))
 
 (defn pull-summary-view
   [app context-data pull-data]
@@ -434,19 +450,20 @@
 (representation/register-representation
   ::label-view
   (fn [app _ attr-ident]
-    (when attr-ident
-      [re-com/label
-       :style {:font-size "14px"
-               :font-weight "bold"}
-       :label
-       ;; XXX Again, should be pull-based
-       (or (:attribute/label @(posh/pull (:conn app) [:attribute/label] [:db/ident attr-ident]))
-           (lablify-attr-ident attr-ident))])))
+    [:div
+     (log/info "Inside the beast")
+     (when attr-ident
+       [re-com/label
+        :style {:font-size "14px"
+                :font-weight "bold"}
+        :label
+        (or (:attribute/label @(posh/pull (:conn app) [:db/id :db/ident :attribute/label] [:db/ident attr-ident]))
+            (lablify-attr-ident attr-ident))])]))
 
 (defn label-view
   "For a given attr-ident, render a label for that attribute."
   ([app context-data attr-ident]
-   (represent app [::label-view context-data] attr-ident))
+   [represent app [::label-view context-data] attr-ident])
   ([app attr-ident]
    (label-view app {} attr-ident)))
 
@@ -541,9 +558,10 @@
        (match [attr-sig]
          ;; For now, all refs render the same; May treat component vs non-comp separately later
          [{:db/valueType :db.type/ref}]
+              ;; This is something that will need to be generalized
          (let [nested-context (assoc context-data ::pull-expr (get-nested-pull-expr (::pull-expr context-data) attr-ident))]
            ;; QUESTION: Where should the nsted pull-expr go?
-           [represent app nested-context value])
+           [represent app [::pull-data-view nested-context] value])
          ;; Miscellaneous value
          :else
          (str value))])))
@@ -576,7 +594,7 @@
            (when (or (not collapsable?) (and collapsable? (not @collapse-attribute?)))
              (for [value (utils/deref-or-value values)]
                ^{:key (hash value)}
-               [represent app context-data value]))])))))
+               [represent app [::value-view context-data] value]))])))))
 
 
 ;(defn attr-values-view
@@ -587,15 +605,15 @@
 (representation/register-representation
   ::attr-view
   (fn [app [_ context-data] values]
-    (let [attr-ident (:db.attr/ident context-data)]
-      [:div (:dom/attrs @(component-context app ::attr-view {:dat.view/locals context-data}))
-      ;[:div @(attribute-context app (meta pull-expr) :attr-view)
+    (let [attr-ident (:db.attr/ident context-data)
+          attr-signature @(attribute-signature-reaction app attr-ident)]
+      [:div (:dom/attrs @(component-context app ::attr-view {:dat.view/locals context-data :db.attr/ident attr-ident}))
        [label-view app attr-ident]
-       (match [@(attribute-signature-reaction app attr-ident)]
+       (match [attr-signature]
          [{:db/cardinality :db.cardinality/many}]
-         [represent app [::attr-values-view context-data] [attr-ident values]]
+         [represent app [::attr-values-view context-data] values]
          :else
-         [represent app [::value-view context-data] [attr-ident values]])])))
+         [represent app [::value-view context-data] values])])))
 
 
 ;(defn attr-view
@@ -608,18 +626,19 @@
 
 (defn pull-attributes
   ([pull-expr pull-data]
-   (->> pull-expr
-        (map (fn [attr-spec]
-               (cond
-                 (keyword? attr-spec) attr-spec
-                 (map? attr-spec) (keys attr-spec)
-                 (symbol? attr-spec)
-                 (case attr-spec
-                   '* (filter
-                        (set (pull-attributes (remove #{'*} pull-expr) []))
-                        (keys (utils/deref-or-value pull-data)))))))
-        flatten
-        distinct))
+   (-> pull-expr
+       (->> (map (fn [attr-spec]
+                   (cond
+                     (keyword? attr-spec) attr-spec
+                     (map? attr-spec) (keys attr-spec)
+                     (symbol? attr-spec)
+                     (case attr-spec
+                       '* (filter
+                            (set (pull-attributes (remove #{'*} pull-expr) []))
+                            (keys (utils/deref-or-value pull-data))))))))
+       flatten
+       (concat (keys pull-data))
+       distinct))
   ([pull-expr]
    (pull-attributes pull-expr [])))
 
@@ -629,7 +648,8 @@
   (fn [app [_ context-data] pull-data]
     ;; Annoying to have to do this
     (let [context @(component-context app ::pull-data-view {:dat.view/locals context-data})
-          pull-expr (::pull-expr context)
+          ;; TODO Ignoring the component context here
+          pull-expr (::pull-expr context-data)
           pull-data (utils/deref-or-value pull-data)]
       [:div (:dom/attrs context)
        [:div
@@ -640,7 +660,7 @@
        ;; Need a react-id function that lets us repeat attrs when needed
        (for [attr-ident (distinct (pull-attributes pull-expr pull-data))]
          ^{:key (hash attr-ident)}
-         [represent app [::attr-view context-data] [attr-ident (get pull-data attr-ident)]])])))
+         [represent app [::attr-view (assoc context-data :db.attr/ident attr-ident)] (get pull-data attr-ident)])])))
 
 
 (representation/register-representation
@@ -1203,8 +1223,7 @@
                                {:padding "5px 12px"})}}
     ::label-view
     {:dom/attrs {:style {:font-size "14px"
-                         :font-weight "bold"}}
-     ::component label-view}
+                         :font-weight "bold"}}}
     ::pull-data-view
     {:dom/attrs {:style (merge h-box-styles
                                bordered-box-style

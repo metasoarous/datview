@@ -7,7 +7,8 @@
             [reagent.ratom :refer-macros [reaction]]
             [goog.events]
             [dat.reactor :as reactor]
-            [dat.view.utils :as utils])
+            [dat.view.utils :as utils]
+            [taoensso.timbre :as log])
   (:import [goog.history Html5History EventType]))
 
 
@@ -65,7 +66,7 @@
       (reaction
         ;; Actually... :dat.sync/route should maybe just be its own ident...
         (bidi/match-route (utils/deref-or-value (:routes app))
-                          (or @(settings/get-setting app ::current-path)) "/")))))
+                          (or @(settings/get-setting app ::current-path) "/"))))))
 
 
 ;; XXX Should probably handle this through a handler... but for now...

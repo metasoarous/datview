@@ -2,26 +2,28 @@
   (:require-macros [reagent.ratom :refer [reaction]]
                    [cljs.core.async.macros :refer [go go-loop]])
   ;; Need to abstract the ws
-  (:require [dat.view :as dat.view]
-            [dat.view.router :as router]
-            [dat.view.settings :as settings]
-            [dat.view.representation :as representation]
-            [cljs-time.core :as cljs-time]
-            [cljs-time.format]
-            [cljs-time.coerce]
-            [cljs.pprint :as pp]
-            [cljs.core.match :as match :refer-macros [match]]
-            [cljs.core.async :as async]
-            [datascript.core :as d]
-            [reagent.core :as r]
-            [re-com.core :as re-com]
-            [posh.reagent :as posh]
-            [testdouble.cljs.csv :as csv]
-            ;; Couldn't get this to work, but would be nice to try again
-            ;[cljsjs.papaparse :as csv]
-            [cljs-uuid-utils.core :as uuid]
-            [goog.date.Date]
-            [bidi.bidi :as bidi]))
+  (:require
+    [dat.view :as dat.view]
+    [dat.view.router :as router]
+    [dat.view.settings :as settings]
+    [dat.view.representation :as representation]
+    [cljs-time.core :as cljs-time]
+    [cljs-time.format]
+    [cljs-time.coerce]
+    [cljs.pprint :as pp]
+    [cljs.core.match :as match :refer-macros [match]]
+    [cljs.core.async :as async]
+    [datascript.core :as d]
+    [reagent.core :as r]
+    [re-com.core :as re-com]
+    [posh.reagent :as posh]
+    [testdouble.cljs.csv :as csv]
+    ;; Couldn't get this to work, but would be nice to try again
+    ;[cljsjs.papaparse :as csv]
+    [cljs-uuid-utils.core :as uuid]
+    [goog.date.Date]
+    [bidi.bidi :as bidi]
+    [taoensso.timbre :as log]))
 
 
 
@@ -278,23 +280,29 @@
                                                   [attribute-column-selector-row app attr-entity (conj seen type-eid)])]]])]]
            [re-com/label :label "Seen"]))))))
 
-;; Build a magical selector for attributes
+(representation/register-representation
+  ::column-selector
+  (fn [app [_ context-data] column-selector-id]
+    (let [collapse? (r/atom true)]
+      (fn [app [_ context-data] column-selector-id]
+        (let [base-type (::base-type context-data)]
+          [re-com/v-box
+           :children [[re-com/h-box
+                       :children [[dat.view/collapse-button collapse?]
+                                  [re-com/title :level :level3 :label "Table column selector:"]]]
+                      (when-not @collapse?
+                        [re-com/border
+                         :border "1px solid black"
+                         :width "300px"
+                         :max-height "300px"
+                         :style {:overflow-y "scroll"}
+                         :child [attribute-column-selector-rows app column-selector-id (:db/id @(posh/pull (:conn app) '[:db/id] base-type))]])]])))))
+
+; Build a magical selector for attributes
 (defn attribute-column-selector
   "The top level attribute column selector component; based on type eid or lookup ref (like [:db/ident :e.type/Comment])."
-  [app  column-selector base-type]
-  (let [collapse? (r/atom true)]
-    (fn [_ base-type]
-      [re-com/v-box
-       :children [[re-com/h-box
-                   :children [[dat.view/collapse-button collapse?]
-                              [re-com/title :level :level3 :label "Table column selector:"]]]
-                  (when-not @collapse?
-                    [re-com/border
-                     :border "1px solid black"
-                     :width "300px"
-                     :max-height "300px"
-                     :style {:overflow-y "scroll"}
-                     :child [attribute-column-selector-rows app column-selector (:db/id @(posh/pull (:conn app) '[:db/id] base-type))]])]])))
+  [app column-selector base-type]
+  [representation/represent app [::column-selector {::base-type base-type}] column-selector])
 
 
 (representation/register-representation
@@ -323,11 +331,13 @@
      (for [[i value] (map-indexed vector row)]
        (let [path (nth (::paths context-data) i nil)]
          ^{:key i}
-         [dat.view/represent app [::row-value-view (assoc context-data
-                                                     ;; Shoud be associng in the attr-ident as well
-                                                     ::path path
-                                                     :db.attr/ident (last path)
-                                                     ::row-index i)]]))]))
+         [dat.view/represent app
+                             [::row-value-view (assoc context-data
+                                                 ;; Shoud be associng in the attr-ident as well
+                                                 ::path path
+                                                 :db.attr/ident (last path)
+                                                 ::row-index i)]
+                             value]))]))
 
 
 (defn entity-row-view
@@ -352,7 +362,7 @@
 (representation/register-representation
   ::header-view
   (fn [app [_ context-data] _]
-    (let [[{:keys [query sym-mapping]}] context-data
+    (let [{:keys [query sym-mapping]} context-data
           find-syms (:find query)]
       [:tr
        (for [sym find-syms]
@@ -366,7 +376,7 @@
 
 (defn header-view
   [app context-data]
-  [dat.view/represent app context-data nil])
+  [dat.view/represent app [::header-view context-data] nil])
 
 
 ;; Writing out results
@@ -416,11 +426,12 @@
   (fn [app [_ context-data] eids]
     (let [column-selector (::column-selector context-data)
           base-type (::base-type context-data)
+          _ (log/debug "table view context" context-data)
           conn (:conn app)
           conn-reaction (dat.view/as-reaction conn)
           query-context (type-query-reaction conn-reaction base-type)]
           ;query-results (evaluate-query conn query-context eids)]
-      (fn [app eids base-type]
+      (fn [app [_ context-data] eids]
         (let [ordered-paths (ordered-paths @query-context)
               ;; Question: What if conn changes? Compute in inner fn?
               rows @(posh/q (:query @query-context) conn eids)]
@@ -436,8 +447,8 @@
                                   [attribute-column-selector app column-selector base-type]]]
                       [:table
                        [:tbody
-                        [header-view @query-context]
-                        (for [row (distinct rows)]
+                        [header-view app @query-context]
+                        (for [row rows]
                           ^{:key (hash row)}
                           [dat.view/represent app [::row-view context-data] row])]]]])))))
                           ;[entity-row-view ordered-paths row])]]]]))))
@@ -449,8 +460,8 @@
   ;; Should generate a column-selector from
   [app column-selector base-type eids]
   (dat.view/represent app
-                      [::table-view {::mode ::eids}
-                                    ::base-type base-type
-                                    ::column-selector column-selector]
+                      [::table-view {::mode ::eids
+                                     ::base-type base-type
+                                     ::column-selector column-selector}]
                       eids))
 

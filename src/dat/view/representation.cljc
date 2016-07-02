@@ -5,15 +5,24 @@
     [taoensso.timbre :as log]))
 
 
+;(def represent* nil)
 (defmulti represent*
   "Reprsent some data given a context"
-  (fn [app [context-id context-data] data]
-    context-id))
+  (fn [_ context _]
+    (try
+      (first context)
+      (catch #?(:clj Exception :cljs :default) e
+        (log/error "Could not dispatch on malformed context:" context)))))
 
 
 (defn represent
   [app context data]
-  [represent* app context data])
+  #?(:cljs (r/create-class
+             {:display-name (str "representation " (try (first context) (catch :default _ "?")))
+              :reagent-render
+              (fn [app context data]
+                [represent* app context data])})
+     :clj [represent* app context data]))
 
 
 ;; TODO Replace evil global mutable state with local values!
@@ -32,10 +41,23 @@
       @registration-reaction
       (representation-fn app context data))))
 
+(defn handle-errors
+  "Representation middleware: *Should* make it so that when we update representations on the client, they update in the views."
+  [context-id representation-fn]
+  (fn [app context data]
+    ;; Goal: This should only update if we have changed the representation (in cljs); We'll see :-)
+    ;; If we defined reaction in clj, we could actually _use_ the defer value to compute the new function
+    (try
+      (representation-fn app context data)
+      (catch #?(:clj Exception :cljs :default) e
+        (log/error e (str "Exception raised for representation: " context-id))
+        [:div "Error rendering component" (str context-id)]))))
+
 (defn register-representation
   "Registers a representation function under the given context-id, given middleware (to which reactively-register is appended)."
   ([context-id middleware representation-fn]
-   (let [base-middleware [(partial reactively-register context-id)]
+   (let [base-middleware [(partial reactively-register context-id)
+                          (partial handle-errors context-id)]
          middleware (concat middleware base-middleware)
          middleware-fn (apply comp middleware)
          representation-fn' (middleware-fn representation-fn)]

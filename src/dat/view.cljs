@@ -449,9 +449,9 @@
 
 (representation/register-representation
   ::label-view
-  (fn [app _ attr-ident]
+  (fn [app context attr-ident]
     [:div
-     (log/info "Inside the beast")
+     (log/info "Inside the beast" context)
      (when attr-ident
        [re-com/label
         :style {:font-size "14px"
@@ -608,7 +608,7 @@
     (let [attr-ident (:db.attr/ident context-data)
           attr-signature @(attribute-signature-reaction app attr-ident)]
       [:div (:dom/attrs @(component-context app ::attr-view {:dat.view/locals context-data :db.attr/ident attr-ident}))
-       [label-view app attr-ident]
+       [represent app [::label-view (assoc context-data ::attr-signature attr-signature)] attr-ident]
        (match [attr-signature]
          [{:db/cardinality :db.cardinality/many}]
          [represent app [::attr-values-view context-data] values]

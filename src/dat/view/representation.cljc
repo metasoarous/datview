@@ -5,6 +5,10 @@
     [taoensso.timbre :as log]))
 
 
+(defn cljc-atom [init-value]
+  (#?(:cljs r/atom :clj atom)
+    init-value))
+
 ;(def represent* nil)
 (defmulti represent*
   "Reprsent some data given a context"
@@ -27,7 +31,7 @@
 
 ;; TODO Replace evil global mutable state with local values!
 (def registrations
-  (#?(:cljs r/atom :clj atom) {}))
+  (cljc-atom {}))
 
 (defn reactively-register
   "Representation middleware: *Should* make it so that when we update representations on the client, they update in the views."
@@ -50,8 +54,23 @@
     (try
       (representation-fn app context data)
       (catch #?(:clj Exception :cljs :default) e
-        (log/error e (str "Exception raised for representation: " context-id))
-        [:div "Error rendering component" (str context-id)]))))
+        (let [collapse? (cljc-atom true)]
+          (fn [app context data]
+            (log/error e (str "Exception raised for representation: " context-id))
+            [:div.error {:style {:border-style "solid" :border-color "red" :padding "8px 12px" :margin "15px 3px"}}
+             [:p [:strong "Error rendering component " (str context-id)]]
+             [:p [:a {:on-click (fn [& args] (swap! collapse? not))} "See more/less"]]
+             (when-not @collapse?
+               [:div
+                [:p "Error"]
+                [:pre e
+                 #?(:cljs (.-stack e))]
+                [:p "Context:"]
+                [:pre context]
+                [:p "Data:"]
+                [:pre data]])]))))))
+
+
 
 (defn register-representation
   "Registers a representation function under the given context-id, given middleware (to which reactively-register is appended)."

@@ -190,6 +190,42 @@
 
 
 
+;; ## Reactions
+
+(defn as-reaction
+  "Treat a regular atom as though it were a reaction"
+  [vanilla-atom]
+  (let [trigger (r/atom 0)]
+    (add-watch vanilla-atom :as-reaction-trigger (fn [& args] (swap! trigger inc)))
+    (reaction
+      @trigger
+      @vanilla-atom)))
+
+;; XXX This will be coming to posh soon, but in case we need it earlier
+
+
+(def safe-pull
+  "A version of posh/pull where missing lookup refs should behave properly (generally), but also behave more like Datomic than
+  DataScript by returning `{:db/id nill}` instead of erroring when passed bad lookup refs."
+  (memoize
+    (fn safe-pull
+      [conn pattern eid-or-lookup]
+      (reaction
+        (let [eid (cond (int? eid-or-lookup) eid-or-lookup
+                        ;; TODO Hmm... should we be testing here to make sure this is unique
+                        (vector? eid-or-lookup) @(posh/q [:find '?e '. :where (into '[?e] eid-or-lookup)] conn)
+                        (:db/id eid-or-lookup) (:db/id eid-or-lookup))]
+          (if eid
+            @(posh/pull conn pattern eid)
+            {:db/id nil}))))))
+
+(defn pull-many
+  [app pattern eids]
+  (let [conn-reaction (as-reaction (:conn app))]
+    (reaction (d/pull-many @conn-reaction pattern eids))))
+
+
+
 ;; ## Context
 
 ;; We're going to be re-describing things in terms of context.
@@ -211,7 +247,7 @@
       (reaction
         (try
           (:dat.view.base-context/value
-            @(posh/pull (:conn app) '[*] [:db/ident ::base-context]))
+            @(safe-pull (:conn app) '[*] [:db/ident ::base-context]))
           ;; Easter egg:
           ;; A self installing config entity :-) Good pattern?
           (catch :default e
@@ -233,24 +269,6 @@
   (update-base-context! app (constantly context)))
 
 
-
-;; ## Reactions
-
-(defn as-reaction
-  "Treat a regular atom as though it were a reaction"
-  [vanilla-atom]
-  (let [trigger (r/atom 0)]
-    (add-watch vanilla-atom :as-reaction-trigger (fn [& args] (swap! trigger inc)))
-    (reaction
-      @trigger
-      @vanilla-atom)))
-
-;; XXX This will be coming to posh soon, but in case we need it earlier
-
-(defn pull-many
-  [app pattern eids]
-  (let [conn-reaction (as-reaction (:conn app))]
-    (reaction (d/pull-many @conn-reaction pattern eids))))
 
 
 (defn meta-sig
@@ -277,7 +295,7 @@
     (fn [app attr-ident]
       (if (= attr-ident :db/id)
         (reaction {:db/id nil})
-        (posh/pull (:conn app)
+        (safe-pull (:conn app)
                    '[* {:db/valueType [:db/ident]
                         :db/cardinality [:db/ident]
                         :db/unique [:db/ident]
@@ -451,13 +469,12 @@
   ::label-view
   (fn [app context attr-ident]
     [:div
-     (log/info "Inside the beast" context)
      (when attr-ident
        [re-com/label
         :style {:font-size "14px"
                 :font-weight "bold"}
         :label
-        (or (:attribute/label @(posh/pull (:conn app) [:db/id :db/ident :attribute/label] [:db/ident attr-ident]))
+        (or (:attribute/label @(safe-pull (:conn app) [:db/id :db/ident :attribute/label] [:db/ident attr-ident]))
             (lablify-attr-ident attr-ident))])]))
 
 (defn label-view
@@ -666,7 +683,7 @@
 (representation/register-representation
   ::pull-view
   (fn [app [_ context-data] [pull-expr eid]]
-    (let [pull-data (posh/pull (:conn app) pull-expr eid)]
+    (let [pull-data (safe-pull (:conn app) pull-expr eid)]
       [represent app [::pull-data-view (assoc context-data ::pull-expr pull-expr)] pull-data])))
 
 
@@ -691,13 +708,13 @@
 
 (defn attr-sort-by
   [app attr-ident]
-  (reaction (or (:db/ident (:attribute/sort-by @(posh/pull (:conn app) '[*] [:db/ident attr-ident])))
+  (reaction (or (:db/ident (:attribute/sort-by @(safe-pull (:conn app) '[:db/ident] [:db/ident attr-ident])))
                 ;; Should add smarter option for :e/order as a generic? Or is this just bad semantics?
                 :db/id)))
 
 (defn value-type
   [app attr-ident]
-  (reaction (:db/valueType @(posh/pull (:conn app) '[*] [:db/ident attr-ident]))))
+  (reaction (:db/valueType @(safe-pull (:conn app) '[*] [:db/ident attr-ident]))))
 
 (defn reference?
   [app attr-ident values]
@@ -817,7 +834,7 @@
 
 ;; ### Datetimes...
 
-;; TODO Need to get proper date+time handlers that handle both the time and the
+;; TODO Need to get proper date+time handlers that handle both the date and the time
 
 ;(defn update-date
 ;  [old-instant new-date]
@@ -1154,7 +1171,7 @@
   ([app context pull-expr pull-data-or-eid]
    (when pull-data-or-eid
      (if (integer? pull-data-or-eid)
-       (if-let [current-data @(posh/pull (:conn app) pull-expr pull-data-or-eid)]
+       (if-let [current-data @(safe-pull (:conn app) pull-expr pull-data-or-eid)]
          [pull-form app context pull-expr current-data]
          [loading-notification "Please wait; loading data."])
        ;; The meat of the logic
@@ -1179,7 +1196,7 @@
 
 (defn pull-data-form
   [app pull-expr eid]
-  (if-let [current-data @(posh/pull (:conn app) pull-expr eid)]
+  (if-let [current-data @(safe-pull (:conn app) pull-expr eid)]
     [re-com/v-box :children [[edit-entity-form app eid]]]
     [loading-notification "Please wait; loading data."]))
 

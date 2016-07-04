@@ -210,14 +210,15 @@
   (memoize
     (fn safe-pull
       [conn pattern eid-or-lookup]
-      (reaction
-        (let [eid (cond (int? eid-or-lookup) eid-or-lookup
-                        ;; TODO Hmm... should we be testing here to make sure this is unique
-                        (vector? eid-or-lookup) @(posh/q [:find '?e '. :where (into '[?e] eid-or-lookup)] conn)
-                        (:db/id eid-or-lookup) (:db/id eid-or-lookup))]
-          (if eid
-            @(posh/pull conn pattern eid)
-            {:db/id nil}))))))
+      (if (int? eid-or-lookup)
+        (posh/pull conn pattern eid-or-lookup)
+        ;; TODO Hmm... should we be testing here to make sure this is unique and actually a lookup ref
+        (let [eid-rx (posh/q [:find '?e '. :where (into '[?e] eid-or-lookup)] conn)]
+          (reaction
+            (let [eid @eid-rx]
+              (if (int? eid)
+                @(posh/pull conn pattern eid)
+                {:db/id nil}))))))))
 
 (defn pull-many
   [app pattern eids]

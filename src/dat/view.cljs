@@ -321,7 +321,7 @@
 
 
 ;; This is what does all the work of computing our context for each component
-
+;(def component-context nil)
 (def component-context
   "This function returns the component configuration (base-context; should rename) for either an entire render network,
   abstractly, or for a specific component based on a component id (namespaced keyword matching the function to be called)."
@@ -330,15 +330,16 @@
       ([app]
        (reaction
          ;; Don't need this arity if we drop the distinction between base-context and default-base-context
-         @default-base-context
          (utils/deep-merge
-           @(base-context app))))
+           @default-base-context
+           (utils/deep-merge
+             @(base-context app)))))
       ([app component-id]
        (component-context* app component-id {}))
       ([app component-id {;; Options, in order of precedence in consequent merging
                           :keys [dat.view/locals ;; points to local overrides; highest precedence
                                  ;; When the component is in a scope closed over by some particular attribute:
-                                 db.attr/ident]}] ;; db/ident of the attribute; precedence below locals
+                                 db.attr/ident]}] ;; db/ident of the attribute; precedence below
        (reaction
          (let [merged (utils/deep-merge @(component-context app) (utils/deref-or-value locals))]
            (if ident
@@ -670,6 +671,7 @@
           pull-expr (::pull-expr context-data)
           pull-data (utils/deref-or-value pull-data)]
       [:div (:dom/attrs context)
+       ;[debug "Pull data view context: " context]
        [:div
          [represent app [::control-set context-data] pull-data]
          [:div {:style (merge h-box-styles)}
@@ -1178,7 +1180,6 @@
        ;; The meat of the logic
        (let [context @(component-context app ::pull-form {:dat.view/locals context})]
          [:div (:dom/attrs context)
-          ;; Can you doubly nest for loops like this? XXX WARN
           (for [attr-ident (pull-expr-attributes app pull-expr)]
             ^{:key (hash attr-ident)}
             [field-for app context pull-expr (:db/id pull-data-or-eid) attr-ident (get pull-data-or-eid attr-ident)])])))))
@@ -1206,24 +1207,42 @@
 
 
 (swap! default-base-context
-       utils/deep-merge
-       ;; Top level just says that this is our configuration? Or is that not necessary?
-       {:dat.view/base-config
-                                    {::pull-form
-                                     {:dom/attrs {:style bordered-box-style}}}
-        ;; Specifications merged in for any config
-        :dat.view/card-config {}
-        ;; Specifications merged in for any value type
-        :dat.view/value-type-config {}
-        :dat.view/attr-config {}})
-
+  utils/deep-merge
+  ;; Top level just says that this is our configuration? Or is that not necessary?
+  {:dat.view/base-config
+                               {::pull-form
+                                {:dom/attrs {:style bordered-box-style}}}
+   ;; Specifications merged in for any config
+   :dat.view/card-config {}
+   ;; Specifications merged in for any value type
+   :dat.view/value-type-config {}
+   :dat.view/attr-config {}})
 
 
 
 ;; Setting default context; Comes in precedence even before the DS context
 ;; But should this be config technically?
-;; Note: There are function values in here, so some of this would not be writable to Datomic; But at least some of it could be...)
-;; This stuff should maybe be part of a transaction
+
+;; A datalog model for context: (would be nice to move towards this)
+
+;; :e/type
+;;   :e.type/Context
+;; ::context
+;; ::ident (:dat.view/context-id?)
+;;   :context-id / whatevs
+;; :dat.view.context/level
+;;   :dat.view.context.level/entity
+;;   :dat.view.context.level/attribute
+;; :dat.view.context/attribute
+;; :dat.view.context/type
+;; :dat.view.context/type
+
+;; :dom/attrs
+;; ::controls
+;; ::middleware
+;; ::delegate-to
+
+
 (swap! default-base-context
   utils/deep-merge
   ;; Top level just says that this is our configuration? Or is that not necessary?
@@ -1246,30 +1265,28 @@
     {:dom/attrs {:style (merge h-box-styles
                                bordered-box-style
                                {:padding "8px 15px"
-                                :width "100%"})}
+                                :width "100%"})}}
      ;; Hmm... maybe this should point to the keyword so it can grab from there?
-     ::summary pull-summary-view
-     ::component pull-view}
+     ;::summary pull-summary-view
+     ;::component pull-view}
     ;; XXX This should change shortly...
     ::pull-view-controls
     {:dom/attrs {:style (merge h-box-styles
-                               {:padding "5px"})}
+                               {:padding "5px"})}}
                                 ;:background "#DADADA"})}
                                 ;;; Check if these actually make sense
                                 ;:justify-content "flex-end"})}}
                                 ;:gap "10px"
-     ::component default-pull-view-controls}
+     ;::component default-pull-view-controls}
     ::pull-summary-view
     {:dom/attrs {:style (merge v-box-styles
                                {:padding "15px"
                                 :font-size "18px"
-                                :font-weight "bold"})}
-     ::component pull-summary-view}
-    ::default-field-for-controls
-    {::component default-field-for-controls}
-    :dat.view.forms/field-for
+                                :font-weight "bold"})}}
+     ;::component pull-summary-view}
+    ::field-for
     {:dom/attrs {:style v-box-styles}}}
-   ;; Specifications merged in for any config
+   ;; Specifications merged in for any config with a certain cardinality
    ::card-config {}
    ;; Specifications merged in for any value type
    ::value-type-config {}

@@ -15,6 +15,7 @@
             [re-com.core :as re-com]
             [taoensso.timbre :as log :include-macros true]
             [com.stuartsierra.component :as component]
+            [clojure.walk :as walk]
             [goog.date.Date]
             [cljs-time.core :as cljs-time]
             [cljs.core.async :as async]
@@ -1209,15 +1210,49 @@
 (swap! default-base-context
   utils/deep-merge
   ;; Top level just says that this is our configuration? Or is that not necessary?
-  {:dat.view/base-config
-                               {::pull-form
-                                {:dom/attrs {:style bordered-box-style}}}
+  {:dat.view/base-config {::pull-form
+                          {:dom/attrs {:style bordered-box-style}}}
    ;; Specifications merged in for any config
    :dat.view/card-config {}
    ;; Specifications merged in for any value type
    :dat.view/value-type-config {}
    :dat.view/attr-config {}})
 
+
+;; ## Constructing queries with metadata annotations
+
+(def type-pull
+  ;(memoize
+    (fn [app base-type]
+      (reaction
+        (let [type-data @(posh/pull
+                           (:conn app)
+                           '[:db/id :db/ident
+                             {:e/type ...
+                              :e.type/isa ...
+                              :e.type/attributes ...
+                              :db/valueType ...
+                              :attribute.ref/types ...}]
+                           base-type)]
+          (walk/postwalk
+            (fn [data]
+              (cond
+                ;; For types
+                (:e.type/attributes data)
+                (->> (:e.type/attributes data)
+                     (map (fn [attr]
+                            (if (= (-> attr :db/valueType :db/ident) :db.type/ref)
+                              (if (= (-> attr :db/isComponent))
+                                {(:db/ident attr) (vec (remove nil? (flatten (:attribute.ref/types attr))))}
+                                ;^{:dat.view/component :dat.view/pull-summary-view}
+                                {(:db/ident attr) [:db/id :e/name :e/type :db/ident]})
+                              (:db/ident attr))))
+                     (remove nil?)
+                     (concat [:db/id :db/ident {:e/type [:db/id :db/ident]}])
+                     distinct
+                     vec)
+                :else data))
+            type-data)))))
 
 
 ;; Setting default context; Comes in precedence even before the DS context

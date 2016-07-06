@@ -416,8 +416,9 @@
     [:span
      (match [pull-data]
        [{:e/name name}] name
-       [{:e/type {:db/ident type-ident}}] (name type-ident)
        [{:attribute/label label}] label
+       [{:db/ident ident}] (name ident)
+       [{:e/type {:db/ident type-ident}}] (str (name type-ident) " instance")
        ;; A terrible assumption really, but fine enough for now
        :else (pr-str pull-data))]))
 
@@ -425,7 +426,7 @@
   ([app pull-data]
    (pull-summary-string app {} pull-data))
   ([app context-data pull-data]
-   (represent app [::pull-summary-string context-data] pull-data)))
+   [represent app [::pull-summary-string context-data] pull-data]))
 
 
 (representation/register-representation
@@ -436,7 +437,7 @@
 
 (defn pull-summary-view
   [app context-data pull-data]
-  (represent app [::pull-summary-view context-data] pull-data))
+  [represent app [::pull-summary-view context-data] pull-data])
 
 
 (representation/register-representation
@@ -447,13 +448,14 @@
                          {:padding "10px"})}
                           ;:align :end
                           ;:gap "20px"
+     ;[debug "collapse-context: " context-data]
      (for [value (distinct values)]
        ^{:key (hash value)}
-       [pull-summary-view app context-data value])]))
+       [represent app [::pull-summary-view context-data] value])]))
 
 (defn collapse-summary
   [app context-data values]
-  (represent app [::collapse-summary context-data] values))
+  [represent app [::collapse-summary context-data] values])
 
 
 
@@ -609,7 +611,7 @@
            (when collapsable?
              [collapse-button collapse-attribute?])
            (when @collapse-attribute?
-             [collapse-summary app context values])
+             [collapse-summary app context-data values])
            ;(defn pull-summary-view [app pull-expr pull-data]
            (when (or (not collapsable?) (and collapsable? (not @collapse-attribute?)))
              (for [value (utils/deref-or-value values)]
@@ -683,6 +685,11 @@
          ^{:key (hash attr-ident)}
          [represent app [::attr-view (assoc context-data :db.attr/ident attr-ident)] (get pull-data attr-ident)])])))
 
+
+;; See definition below
+(declare meta-context)
+
+;; Note that here we extract the meta-context from the pull-expr
 
 (representation/register-representation
   ::pull-view
@@ -1207,52 +1214,95 @@
 ;[app pull-expr eid])
 
 
-(swap! default-base-context
-  utils/deep-merge
-  ;; Top level just says that this is our configuration? Or is that not necessary?
-  {:dat.view/base-config {::pull-form
-                          {:dom/attrs {:style bordered-box-style}}}
-   ;; Specifications merged in for any config
-   :dat.view/card-config {}
-   ;; Specifications merged in for any value type
-   :dat.view/value-type-config {}
-   :dat.view/attr-config {}})
-
 
 ;; ## Constructing queries with metadata annotations
 
+
 (def type-pull
   ;(memoize
-    (fn [app base-type]
-      (reaction
-        (let [type-data @(posh/pull
-                           (:conn app)
-                           '[:db/id :db/ident
-                             {:e/type ...
-                              :e.type/isa ...
-                              :e.type/attributes ...
-                              :db/valueType ...
-                              :attribute.ref/types ...}]
-                           base-type)]
-          (walk/postwalk
-            (fn [data]
-              (cond
-                ;; For types
-                (:e.type/attributes data)
-                (->> (:e.type/attributes data)
-                     (map (fn [attr]
-                            (if (= (-> attr :db/valueType :db/ident) :db.type/ref)
-                              (if (= (-> attr :db/isComponent))
-                                {(:db/ident attr) (vec (remove nil? (flatten (:attribute.ref/types attr))))}
-                                ;^{:dat.view/component :dat.view/pull-summary-view}
-                                {(:db/ident attr) [:db/id :e/name :e/type :db/ident]})
-                              (:db/ident attr))))
-                     (remove nil?)
-                     (concat [:db/id :db/ident {:e/type [:db/id :db/ident]}])
-                     distinct
-                     vec)
-                :else data))
-            type-data)))))
+    (fn type-pull*
+      ([app base-type]
+       (type-pull* app {} base-type))
+      ([app context base-type]
+       (reaction
+         (let [type-data @(posh/pull
+                            (:conn app)
+                            '[:db/id :db/ident :db/isComponent
+                              {:e/type ...
+                               :e.type/isa ...
+                               :e.type/attributes ...
+                               :db/valueType ...
+                               :attribute.ref/types ...}]
+                            base-type)]
+           (walk/postwalk
+             (fn [data]
+               (cond
+                 ;; For types
+                 (:e.type/attributes data)
+                 (->> (:e.type/attributes data)
+                      ;; Assoc in a virtual attribute about whether a ref or not
+                      (map (fn [attr] (assoc attr :db.type/ref? (-> attr :db/valueType :db/ident #{:db.type/ref}))))
+                      ;; Mocking in :db/id, :db/ident and :e/type, since want for everything
+                      (concat [{:db/ident :db/id}
+                               ;; Should hide ident if not needed TODO
+                               {:db/ident :db/ident}
+                               {:db/ident :e/type
+                                :db.type/ref? true
+                                :attribute.ref/types [{:db/ident :e.type/Type
+                                                       :e.type/attributes [{:db/ident :db/id}
+                                                                           {:db/ident :db/ident}]}]}])
+                      (sort-by (fn [attr] (or (:e/order attr)
+                                              (cond
+                                                (:db/isComponent attr) 2
+                                                (:db.type/ref? attr) 1
+                                                :else 0))))
+                      ;; TODO Take into account isa subtypes and super types
+                      (map (fn [attr]
+                             (if (:db.type/ref? attr)
+                               (if (:db/isComponent attr)
+                                 {(:db/ident attr)
+                                  (with-meta
+                                    (->> (:attribute.ref/types attr)
+                                         flatten
+                                         (remove nil?)
+                                         ;; Note; I guess we don't need pull extsras here since *
+                                         (concat ['*])
+                                         vec)
+                                    {(:db/ident attr) {:ref true}})}
+                                 {(:db/ident attr)
+                                  ;; TODO Handle these
+                                  (-> (::pull-summary-attrs context)
+                                      (get (:db/ident attr))
+                                      (concat [:e/name :e/description :db/ident {:e/type [:db/id :db/ident]}])
+                                      vec
+                                      (with-meta {(:db/ident attr)
+                                                  {::component ::pull-summary-view ::collapsed? true}}))})
+                               (:db/ident attr))))
+                      ;; Oh... shouldn't need this. This was probably because of the component refs?
+                      (remove nil?)
+                      distinct
+                      vec
+                      (#(with-meta % (merge (meta %) {;:e/type data
+                                                      :e/type-ident (:db/ident data)}))))
+                 :else data))
+             type-data))))))
+
+;; This is effectively our metadata model
+
+(defn meta-context
+  [pull-expr]
+  (walk/postwalk
+    (fn [data]
+      (cond
+        (vector? data)
+        (assoc
+          (meta data)
+          ::references
+          (->> data
+               (filter map?)
+               (apply merge)))
+        :else data))
+    pull-expr))
 
 
 ;; Setting default context; Comes in precedence even before the DS context
@@ -1281,6 +1331,17 @@
 (swap! default-base-context
   utils/deep-merge
   ;; Top level just says that this is our configuration? Or is that not necessary?
+       (swap! default-base-context
+              utils/deep-merge
+              ;; Top level just says that this is our configuration? Or is that not necessary?
+              {:dat.view/base-config {::pull-form
+                                      {:dom/attrs {:style bordered-box-style}}}
+               ;; Specifications merged in for any config
+               :dat.view/card-config {}
+               ;; Specifications merged in for any value type
+               :dat.view/value-type-config {}
+               :dat.view/attr-config {}})
+
   {::base-config
    {::attr-values-view
     {:dom/attrs {:style h-box-styles}

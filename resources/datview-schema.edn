@@ -234,7 +234,7 @@
      :db/doc         "Notates that this entity is a copy of some other entity; used for making it easy to copy over comments etc"
      :attribute/label "Copy of"
      :attribute.ref/types [:e.type/Entity]
-     :db.install/_attribute :db.part/db}]]}
+     :db.install/_attribute :db.part/db}]]}}
  ;;
  ;; Future migrations will go here...
  ;:datview/future-extension
@@ -254,6 +254,6 @@
      ;:db/doc         "Imaginary subcategories"
      ;:db.install/_attribute :db.part/db}]]}
  ;; End of schema
- }
+
 
 

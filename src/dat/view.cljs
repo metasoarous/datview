@@ -292,7 +292,7 @@
 ;; ### Attribute metadata reactions
 
 (def attribute-schema-reaction
-  "Returns the corresponding attr-ident entry from the Datomic schema. Returns full entity references; Have to path for idents."
+  "Returns the corresponding attr-ident entry from the Datomic schema. Returns full entity ref-attr; Have to path for idents."
   (memoize
     (fn [app attr-ident]
       (if (= attr-ident :db/id)
@@ -306,7 +306,7 @@
 
 ;; Another function gives us a version of this that maps properly to idents
 (def attribute-signature-reaction
-  "Reaction of the pull of a schema attribute, where any references to something with any ident entity
+  "Reaction of the pull of a schema attribute, where any ref-attrs to something with any ident entity
   have been replaced by that ident keyword."
   (memoize
     (fn [app attr-ident]
@@ -444,7 +444,7 @@
   ::collapse-summary
   (fn [app [_ context-data] values]
     ;; XXX Need to stylyze and take out of re-com styling
-    [:div {:style (merge v-box-styles
+    [:div {:style (merge h-box-styles
                          {:padding "10px"})}
                           ;:align :end
                           ;:gap "20px"
@@ -1218,22 +1218,28 @@
 ;; ## Constructing queries with metadata annotations
 
 
+(defn type-data
+  [app base-type]
+  (posh/pull
+    (:conn app)
+    '[:db/id :db/ident :db/isComponent
+      {:e/type ...
+       :e.type/isa ...
+       :e.type/attributes ...
+       :db/valueType ...
+       :attribute.ref/types ...}]
+    base-type))
+
+
+;; XXX Note; recursive isComponent attribute relations break this
 (def type-pull
   ;(memoize
     (fn type-pull*
       ([app base-type]
        (type-pull* app {} base-type))
-      ([app context base-type]
+      ([app base-context base-type]
        (reaction
-         (let [type-data @(posh/pull
-                            (:conn app)
-                            '[:db/id :db/ident :db/isComponent
-                              {:e/type ...
-                               :e.type/isa ...
-                               :e.type/attributes ...
-                               :db/valueType ...
-                               :attribute.ref/types ...}]
-                            base-type)]
+         (let [type-data @(type-data app base-type)]
            (walk/postwalk
              (fn [data]
                (cond
@@ -1268,15 +1274,14 @@
                                          ;; Note; I guess we don't need pull extsras here since *
                                          (concat ['*])
                                          vec)
-                                    {(:db/ident attr) {:ref true}})}
+                                    {:ref true})}
                                  {(:db/ident attr)
                                   ;; TODO Handle these
-                                  (-> (::pull-summary-attrs context)
+                                  (-> (::pull-summary-attrs base-context)
                                       (get (:db/ident attr))
                                       (concat [:e/name :e/description :db/ident {:e/type [:db/id :db/ident]}])
                                       vec
-                                      (with-meta {(:db/ident attr)
-                                                  {::component ::pull-summary-view ::collapsed? true}}))})
+                                      (with-meta {::component ::pull-summary-view ::collapsed? true}))})
                                (:db/ident attr))))
                       ;; Oh... shouldn't need this. This was probably because of the component refs?
                       (remove nil?)
@@ -1286,23 +1291,86 @@
                                                       :e/type-ident (:db/ident data)}))))
                  :else data))
              type-data))))))
-
 ;; This is effectively our metadata model
+
+
+;(s/def ::pull-kv
+;  ;; Should make this a recursive thing that fully specs...
+;  (s/cat :reference keyword? :pull-expr vector?))
+
+;(s/def ::pull-expr
+;  (s/* (s/or keyword? map? symbol?)))
+
+;(defn pull-walk
+;  "Traverses form, an arbitrary data structure.  inner and outer are
+;  functions.  Applies inner to each element of form, building up a
+;  data structure of the same type, then applies outer to the result.
+;  Recognizes all Clojure data structures. Consumes seqs as with doall."
+;
+;  {:added "1.1"}
+;  [inner outer form]
+;  (cond
+;    (list? form) (outer (apply list (map inner form)))
+;    ;(instance? clojure.lang.IMapEntry form) (outer (vec (map inner form)))
+;    (map? form)
+;    (seq? form) (outer (doall (map inner form)))
+;    ;(instance? clojure.lang.IRecord form
+;    ;  (outer (reduce (fn [r x] (conj r (inner x))) form form)))
+;    (coll? form) (outer (into (empty form) (map inner form)))
+;    :else (outer form)))
+
+;(defn meta-context
+;  [pull-expr]
+;  (walk/walk
+;    ;(partial walk/postwalk meta-context)
+;    (fn [x]
+;      (cond
+;        (map? x) (into {} (map (fn [[k v]] [k (meta-context v)])))
+;        :else (meta-context x)))
+;    meta-context
+;    pull-expr))
+
 
 (defn meta-context
   [pull-expr]
-  (walk/postwalk
-    (fn [data]
-      (cond
-        (vector? data)
-        (assoc
-          (meta data)
-          ::references
-          (->> data
-               (filter map?)
-               (apply merge)))
-        :else data))
-    pull-expr))
+  (let [ref-attrs (filter map? pull-expr)
+        non-ref-attrs (remove map? pull-expr)]
+    (assoc
+      (meta pull-expr)
+      ::origin pull-expr
+      ::ref-attrs
+      (->> ref-attrs
+           (apply merge)
+           (map
+             (fn [[attr-ident attr-pull-expr]]
+               [attr-ident (meta-context attr-pull-expr)]))
+           (into {}))
+      ::non-ref-attrs non-ref-attrs)))
+
+
+;(defn meta-context
+;  [pull-expr]
+;  (walk/postwalk
+;    (fn [data]
+;      (cond
+;        ;; If we're not careful here, we match kv pairs in vectors as vectors themselves
+;        (and (vector? data)
+;             (not (-> data second vector?)))
+;        (assoc
+;          (meta data)
+;          ::pull-for :x
+;          ::orig data
+;          ::non-ref-attrs
+;          (->> data
+;               (remove map?)
+;               vec)
+;          ::ref-attrs
+;          (->> data
+;               (filter map?)
+;               (reduce utils/deep-merge)))
+;        :else data))
+;    pull-expr))
+
 
 
 ;; Setting default context; Comes in precedence even before the DS context
@@ -1331,23 +1399,14 @@
 (swap! default-base-context
   utils/deep-merge
   ;; Top level just says that this is our configuration? Or is that not necessary?
-       (swap! default-base-context
-              utils/deep-merge
-              ;; Top level just says that this is our configuration? Or is that not necessary?
-              {:dat.view/base-config {::pull-form
-                                      {:dom/attrs {:style bordered-box-style}}}
-               ;; Specifications merged in for any config
-               :dat.view/card-config {}
-               ;; Specifications merged in for any value type
-               :dat.view/value-type-config {}
-               :dat.view/attr-config {}})
-
   {::base-config
-   {::attr-values-view
+   {::pull-form
+    {:dom/attrs {:style bordered-box-style}}
+    ::attr-values-view
     {:dom/attrs {:style h-box-styles}
      ;; Right now only cardinality many attributes are collapsable; Should be able to set any? Then set for cardinality many as a default? XXX
      :dat.view.collapse/collapsable? true
-     :dat.view.collapse/default false} ;; Default; nothing is collapsed
+     :dat.view.collapse/default true} ;; Default; everything is collapsed
     ::value-view
     {:dom/attrs {:style (merge h-box-styles
                                {:padding "3px"})}}

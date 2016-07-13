@@ -547,10 +547,10 @@
 (representation/register-representation
   ::control-set
   (fn [app [_ context-data] data]
-    (let [context-data (component-context app ::control-set {::locals context-data})]
+    (let [context @(component-context app ::control-set {::locals context-data})]
       ;; XXX This was ::pull-view-controls, now ::control-set
-      [:div (:dom/attrs @(component-context app ::pull-view-controls {::locals context-data}))
-       (for [control-id (distinct (component-controls context-data))]
+      [:div (:dom/attrs context)
+       (for [control-id (distinct (component-controls context))]
          ^{:key (hash control-id)}
          [represent app [control-id context-data] data])])))
 
@@ -579,12 +579,12 @@
           attr-sig @(attribute-signature-reaction app attr-ident)
           context @(component-context app ::value-view {::locals context-data})]
       [:div (:dom/attrs context)
-       ;[debug "context:" context]
+       ;[debug "context dom/attrs:" (:dom/attrs context)]
        (match [attr-sig]
          ;; For now, all refs render the same; May treat component vs non-comp separately later
          [{:db/valueType :db.type/ref}]
               ;; This is something that will need to be generalized
-         (let [nested-context (assoc context ::pull-expr (get-nested-pull-expr (::pull-expr context-data) attr-ident))]
+         (let [nested-context (assoc context-data ::pull-expr (get-nested-pull-expr (::pull-expr context) attr-ident))]
            ;; QUESTION: Where should the nsted pull-expr go?
            [represent app [::pull-data-view nested-context] value])
          ;; Miscellaneous value
@@ -698,14 +698,14 @@
              [:div (:dom/attrs context)
               ;[debug "Pull data view context: " context]
               [:div
-                [represent app [::control-set context] pull-data]
+                [represent app [::control-set context-data] pull-data]
                 [:div {:style (merge h-box-styles)}
-                 [represent app [::pull-summary-view context] pull-data]]]
+                 [represent app [::pull-summary-view context-data] pull-data]]]
               ;; XXX TODO Questions:
               ;; Need a react-id function that lets us repeat attrs when needed
               (for [attr-ident (distinct (pull-attributes pull-expr pull-data))]
                 ^{:key (hash attr-ident)}
-                [represent app [::attr-view (assoc context :db.attr/ident attr-ident)] (get pull-data attr-ident)])])])))))
+                [represent app [::attr-view (assoc context-data :db.attr/ident attr-ident)] (get pull-data attr-ident)])])])))))
 
 
 ;; See definition below
@@ -721,6 +721,7 @@
                            ;; !!! Extract and merge the metadata context from the pull expression
                            (merge (meta-context pull-expr))
                            (assoc ::pull-expr pull-data))]
+      ;; TODO We are also associng in the pull expr above somewhere; Should make these play nice together and decide on precedence
       [represent app [::pull-data-view (assoc context-data ::pull-expr pull-expr)] pull-data])))
 
 

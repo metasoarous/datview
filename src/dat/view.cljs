@@ -171,7 +171,7 @@
   ([message data]
    [:div.debug
     [:p message]
-    [:pre (debug-str data)]])
+    [:pre {:style {:max-height "300px" :overflow-y "auto"}} (debug-str data)]])
   ([data]
    (debug "" data)))
 
@@ -180,7 +180,7 @@
 ;; Default view when a representation can't be found
 
 
-(register-representation
+(representation/register-representation
   :default
   (fn [_ context data]
     [:div
@@ -322,36 +322,37 @@
 
 
 ;; This is what does all the work of computing our context for each component
+;; XXX Need to think about this a bit more; The way things are going with the context resolution now, this may become more orthogonal
 ;(def component-context nil)
 (def component-context
   "This function returns the component configuration (base-context; should rename) for either an entire render network,
   abstractly, or for a specific component based on a component id (namespaced keyword matching the function to be called)."
-  (memoize
+  ;(memoize
     (fn component-context*
       ([app]
        (reaction
          ;; Don't need this arity if we drop the distinction between base-context and default-base-context
-         (utils/deep-merge
+         (merge
            @default-base-context
-           (utils/deep-merge
-             @(base-context app)))))
-      ([app component-id]
-       (component-context* app component-id {}))
-      ([app component-id {;; Options, in order of precedence in consequent merging
-                          :keys [dat.view/locals ;; points to local overrides; highest precedence
-                                 ;; When the component is in a scope closed over by some particular attribute:
-                                 db.attr/ident]}] ;; db/ident of the attribute; precedence below
+           @(base-context app))))
+      ([app representation-id]
+       (component-context* app representation-id {}))
+      ([app representation-id {;; Options, in order of precedence in consequent merging
+                               :keys [dat.view/locals ;; points to local overrides; highest precedence
+                                      ;; When the component is in a scope closed over by some particular attribute:
+                                      db.attr/ident]}] ;; db/ident of the attribute; precedence below
        (reaction
-         (let [merged (utils/deep-merge @(component-context app) (utils/deref-or-value locals))]
+         (let [base-context @(component-context app)]
            (if ident
              (let [attr-sig @(attribute-signature-reaction app ident)]
-               (utils/deep-merge (get-in merged [::base-config component-id])
-                                 (get-in merged [::card-config (:db/cardinality attr-sig) component-id])
-                                 (get-in merged [::value-type-config (:db/valueType attr-sig) component-id])
-                                 (get-in merged [::attr-config ident])))
+               (merge (get-in base-context [::base-config representation-id])
+                      (get-in base-context [::card-config (:db/cardinality attr-sig) representation-id])
+                      (get-in base-context [::value-type-config (:db/valueType attr-sig) representation-id])
+                      (get-in base-context [::attr-config ident])))
              ;; Need to also get the value type and card config by the attr-config if that's all that's present; Shouldn't ever
              ;; really need to pass in manually XXX
-             (get-in merged [::base-config component-id]))))))))
+             (merge (get-in base-context [::base-config representation-id])
+                    (utils/deref-or-value locals))))))))
 
 
 
@@ -444,14 +445,16 @@
   ::collapse-summary
   (fn [app [_ context-data] values]
     ;; XXX Need to stylyze and take out of re-com styling
-    [:div {:style (merge h-box-styles
-                         {:padding "10px"})}
-                          ;:align :end
-                          ;:gap "20px"
-     ;[debug "collapse-context: " context-data]
-     (for [value (distinct values)]
-       ^{:key (hash value)}
-       [represent app [::pull-summary-view context-data] value])]))
+    (if (map? values)
+      [represent app [::pull-summary-view context-data] values]
+      [:div {:style (merge h-box-styles
+                           {:padding "10px"})}
+                            ;:align :end
+                            ;:gap "20px"
+       ;[debug "collapse-vals: " values]
+       (for [value (distinct values)]
+         ^{:key (hash value)}
+         [represent app [::pull-summary-view context-data] value])])))
 
 (defn collapse-summary
   [app context-data values]
@@ -576,12 +579,12 @@
           attr-sig @(attribute-signature-reaction app attr-ident)
           context @(component-context app ::value-view {::locals context-data})]
       [:div (:dom/attrs context)
-       ;[debug "Here is the comp-attrs:" attr-sig]
+       ;[debug "context:" context]
        (match [attr-sig]
          ;; For now, all refs render the same; May treat component vs non-comp separately later
          [{:db/valueType :db.type/ref}]
               ;; This is something that will need to be generalized
-         (let [nested-context (assoc context-data ::pull-expr (get-nested-pull-expr (::pull-expr context-data) attr-ident))]
+         (let [nested-context (assoc context ::pull-expr (get-nested-pull-expr (::pull-expr context-data) attr-ident))]
            ;; QUESTION: Where should the nsted pull-expr go?
            [represent app [::pull-data-view nested-context] value])
          ;; Miscellaneous value
@@ -602,12 +605,12 @@
   ::attr-values-view
   (fn [app [_ context-data] values]
     (let [pull-expr (::pull-expr context-data)
-          context @(component-context app ::attr-values-view {::locals (meta pull-expr)})
+          context (component-context app ::attr-values-view {::locals context-data})
           ;; Should put all of the collapsed values in something we can serialize, so we always know what's collapsed
-          collapse-attribute? (r/atom (:dat.view.collapse/default context))]
+          collapse-attribute? (r/atom (::collapsed? @context))]
       (fn [app [_ context-data] values]
-        (let [collapsable? (:dat.view.collapse/collapsable? context)]
-          [:div (:dom/attrs context)
+        (let [collapsable? (::collapsable? @context)]
+          [:div (:dom/attrs @context)
            (when collapsable?
              [collapse-button collapse-attribute?])
            (when @collapse-attribute?
@@ -628,14 +631,15 @@
   ::attr-view
   (fn [app [_ context-data] values]
     (let [attr-ident (:db.attr/ident context-data)
-          attr-signature @(attribute-signature-reaction app attr-ident)]
-      [:div (:dom/attrs @(component-context app ::attr-view {:dat.view/locals context-data :db.attr/ident attr-ident}))
-       [represent app [::label-view (assoc context-data ::attr-signature attr-signature)] attr-ident]
+          attr-signature @(attribute-signature-reaction app attr-ident)
+          child-context-data (merge context-data (get-in context-data [::ref-attrs attr-ident]))]
+      [:div (:dom/attrs @(component-context app ::attr-view {::locals context-data :db.attr/ident attr-ident}))
+       [represent app [::label-view (assoc child-context-data ::attr-signature attr-signature)] attr-ident]
        (match [attr-signature]
          [{:db/cardinality :db.cardinality/many}]
-         [represent app [::attr-values-view context-data] values]
+         [represent app [::attr-values-view child-context-data] values]
          :else
-         [represent app [::value-view context-data] values])])))
+         [represent app [::value-view child-context-data] values])])))
 
 
 ;(defn attr-view
@@ -669,21 +673,39 @@
   ::pull-data-view
   (fn [app [_ context-data] pull-data]
     ;; Annoying to have to do this
-    (let [context @(component-context app ::pull-data-view {:dat.view/locals context-data})
-          ;; TODO Ignoring the component context here
-          pull-expr (::pull-expr context-data)
-          pull-data (utils/deref-or-value pull-data)]
-      [:div (:dom/attrs context)
-       ;[debug "Pull data view context: " context]
-       [:div
-         [represent app [::control-set context-data] pull-data]
-         [:div {:style (merge h-box-styles)}
-          [represent app [::pull-summary-view context-data] pull-data]]]
-       ;; XXX TODO Questions:
-       ;; Need a react-id function that lets us repeat attrs when needed
-       (for [attr-ident (distinct (pull-attributes pull-expr pull-data))]
-         ^{:key (hash attr-ident)}
-         [represent app [::attr-view (assoc context-data :db.attr/ident attr-ident)] (get pull-data attr-ident)])])))
+    (let [context @(component-context app ::pull-data-view {::locals context-data})
+          ;; TODO Ignoring the component context
+          ;; TODO Insert collapse here
+          ;; here we go on collapse
+          collapse-attribute? (r/atom (::collapsed? context))]
+      (fn [app [_ context-data] pull-data]
+        (let [context @(component-context app ::pull-data-view {::locals context-data})
+              collapsable? (::collapsable? context)
+              pull-expr (::pull-expr context)
+              pull-data (utils/deref-or-value pull-data)]
+          [:div
+           ;"Context"
+           ;[:div {:style {:max-height "300px" :overflow-y "scroll"}} [debug (keys context)]]
+           (when collapsable?
+             [collapse-button collapse-attribute?])
+           (when @collapse-attribute?
+             [collapse-summary app context pull-data])
+           ;(defn pull-summary-view [app pull-expr pull-data]
+           (when (or (not collapsable?) (and collapsable? (not @collapse-attribute?)))
+             ;(for [value (utils/deref-or-value pull-data)]
+             ;  ^{:key (hash value)}
+             ;  [represent app [::value-view context] value]
+             [:div (:dom/attrs context)
+              ;[debug "Pull data view context: " context]
+              [:div
+                [represent app [::control-set context] pull-data]
+                [:div {:style (merge h-box-styles)}
+                 [represent app [::pull-summary-view context] pull-data]]]
+              ;; XXX TODO Questions:
+              ;; Need a react-id function that lets us repeat attrs when needed
+              (for [attr-ident (distinct (pull-attributes pull-expr pull-data))]
+                ^{:key (hash attr-ident)}
+                [represent app [::attr-view (assoc context :db.attr/ident attr-ident)] (get pull-data attr-ident)])])])))))
 
 
 ;; See definition below
@@ -693,8 +715,12 @@
 
 (representation/register-representation
   ::pull-view
-  (fn [app [_ context-data] [pull-expr eid]]
-    (let [pull-data (safe-pull (:conn app) pull-expr eid)]
+  (fn [app [_ base-context-data] [pull-expr eid]]
+    (let [pull-data (safe-pull (:conn app) pull-expr eid)
+          context-data (-> base-context-data
+                           ;; !!! Extract and merge the metadata context from the pull expression
+                           (merge (meta-context pull-expr))
+                           (assoc ::pull-expr pull-data))]
       [represent app [::pull-data-view (assoc context-data ::pull-expr pull-expr)] pull-data])))
 
 
@@ -1220,7 +1246,7 @@
 
 (defn type-data
   [app base-type]
-  (posh/pull
+  (safe-pull
     (:conn app)
     '[:db/id :db/ident :db/isComponent
       {:e/type ...
@@ -1281,7 +1307,8 @@
                                       (get (:db/ident attr))
                                       (concat [:e/name :e/description :db/ident {:e/type [:db/id :db/ident]}])
                                       vec
-                                      (with-meta {::component ::pull-summary-view ::collapsed? true}))})
+                                      (with-meta {;::representation ::pull-summary-view
+                                                  ::collapsed? true ::collapsable? true}))})
                                (:db/ident attr))))
                       ;; Oh... shouldn't need this. This was probably because of the component refs?
                       (remove nil?)
@@ -1337,7 +1364,7 @@
         non-ref-attrs (remove map? pull-expr)]
     (assoc
       (meta pull-expr)
-      ::origin pull-expr
+      ::pull-expr pull-expr
       ::ref-attrs
       (->> ref-attrs
            (apply merge)
@@ -1405,8 +1432,8 @@
     ::attr-values-view
     {:dom/attrs {:style h-box-styles}
      ;; Right now only cardinality many attributes are collapsable; Should be able to set any? Then set for cardinality many as a default? XXX
-     :dat.view.collapse/collapsable? true
-     :dat.view.collapse/default true} ;; Default; everything is collapsed
+     ::collapsable? true
+     ::collapsed? true} ;; Default; everything is collapsed
     ::value-view
     {:dom/attrs {:style (merge h-box-styles
                                {:padding "3px"})}}

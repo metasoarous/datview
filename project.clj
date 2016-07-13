@@ -15,8 +15,10 @@
                  [com.andrewmcveigh/cljs-time "0.4.0"]
                  [testdouble/clojurescript.csv "0.2.0"]
                  [datascript "0.15.0"]
-                 [posh "0.5.1"]
+                 [posh "0.5.3.1"]
                  [reagent "0.5.1"]
+                 ;; Not sure if this should just be a dev dep; It's kinda nice
+                 [data-frisk-reagent "0.2.3"]
                  [re-com "0.8.3"]
                  [bidi "2.0.9"]
                  [io.rkn/conformity "0.4.0"] ;; should this be here?

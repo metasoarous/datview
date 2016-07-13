@@ -70,7 +70,7 @@
                 [:p "Data:"]
                 [:pre data]])]))))))
 
-(def resolve-context* nil)
+;(def resolve-context* nil)
 (defmulti resolve-context*
   (fn [app from-representation to-representation-id]
     (first from-representation)))

@@ -683,7 +683,7 @@
               collapsable? (::collapsable? context)
               pull-expr (::pull-expr context)
               pull-data (utils/deref-or-value pull-data)]
-          [:div
+          [:div {:style h-box-styles}
            ;"Context"
            ;[:div {:style {:max-height "300px" :overflow-y "scroll"}} [debug (keys context)]]
            (when collapsable?

@@ -1,5 +1,5 @@
 
-{:datview/base-schema
+{:dat.view/base-schema
  {:txes
   [[;; ## Top level, generic, polymorphic attributes
     ;;
@@ -140,11 +140,12 @@
      :attribute/label "Order"
      :db.install/_attribute :db.part/db}
     {:db/id          #db/id[:db.part/db]
-     :db/ident       :datview.creation/token
+     :db/ident       :dat.view.creation/token
      :db/valueType   :db.type/uuid
      :db/cardinality :db.cardinality/one
      :db/doc         "A remote token used for referencing new entities created on clients (should this be datsync really? What are the semantics of this thing?)"
      :attribute/label "Datview creation token"
+     :attribute/hidden? true
      :db.install/_attribute :db.part/db}]
    ;;
    ;; ## Comment

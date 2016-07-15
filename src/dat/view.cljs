@@ -1517,14 +1517,14 @@
 
 ;; Realy need to set this one up as a component, but for now...
 
-;; Start watching history and on changes, set the :datview/route attribute of the conn db
+;; Start watching history and on changes, set the :dat.view/route attribute of the conn db
 (comment
   (defonce history
     (let [conn (-> system :app :conn) ;; Should probably base this off app directly once component
           history-obj (doto (router/make-history)
                         (router/attach-history-handler! (router/make-handler-fn conn)))]
-      (settings/update-setting conn :datview/history-obj history-obj)
-      ;; Initialize route, really; we don't have a :datview/route set in the db yet, so need to instantiate
+      (settings/update-setting conn :dat.view/history-obj history-obj)
+      ;; Initialize route, really; we don't have a :dat.view/route set in the db yet, so need to instantiate
       (router/update-route! conn))))
 
 

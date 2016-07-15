@@ -110,6 +110,7 @@
         :args (s/cat :app ::app :event ::event)
         :ret (constantly true))
 
+;; TODO Should rename send-remote-tx!
 (defn send-tx!
   "Helper function for dispatching tx messages to server."
   [app tx-forms]
@@ -225,6 +226,12 @@
   [app pattern eids]
   (let [conn-reaction (as-reaction (:conn app))]
     (reaction (d/pull-many @conn-reaction pattern eids))))
+
+
+(def pull-attr
+  "Wraps safe pull, and etracts the results for a given attr"
+  (memoize
+    (fn [conn eid attr-ident])))
 
 
 
@@ -433,7 +440,7 @@
 (representation/register-representation
   ::pull-summary-view
   (fn [app [_ context-data] pull-data]
-    [:div {:style {:font-weight "bold" :padding "5px"}}
+    [:div {:style {:font-weight "bold" :padding "5px" :align-self "end"}}
      [represent app [::pull-summary-string context-data] pull-data]]))
 
 (defn pull-summary-view
@@ -449,7 +456,7 @@
       [represent app [::pull-summary-view context-data] values]
       [:div {:style (merge h-box-styles
                            {:padding "10px"})}
-                            ;:align :end
+                            ;:align :end})}
                             ;:gap "20px"
        ;[debug "collapse-vals: " values]
        (for [value (distinct values)]
@@ -839,14 +846,15 @@
     ;; XXX value arg should be safe as a reaction here
    (let [;options @(attribute-signature-reaction app attr-ident)]
          options (->>
-                   @(posh/q '[:find [(pull ?eid [*]) ...]
+                   @(posh/q '[:find ?eid
                               :in $ ?attr
                               :where [?attr :attribute.ref/types ?type]
-                              [?eid :e/type ?type]]
+                                     [?eid :e/type ?type]]
                             (:conn app)
                             [:db/ident attr-ident])
                    ;; XXX Oh... should we call entity-name entity-label? Since we're really using as the label
                    ;; here?
+                   (pull-many app '[*])
                    (mapv (fn [pull-data] (assoc pull-data :label (pull-summary-string app {} pull-data)
                                                           :id (:db/id pull-data))))
                    (sort-by :label))]
@@ -858,7 +866,9 @@
    [re-com/single-dropdown
     :style {:min-width "150px"}
     :choices options
-    :model (:db/id value)
+    ;; TODO Not sure if this will break things or not; have to test
+    ;:model (:db/id value)
+    :model (or (:db/id value) value)
     :on-change (partial apply-reference-change! app eid attr-ident (:db/id value))]))
 
 
@@ -943,48 +953,54 @@
 ;; Should have this effectively mutlitmethod dispatch using the dat.view customization functionality
 (defn input-for
   ([app context pull-expr eid attr-ident value]
-    ;; XXX TODO Need to base this on the generalized stuff
-   (let [attr @(attribute-signature-reaction app attr-ident)]
-     (match [attr context]
-            ;; The first two forms here have to be compbined and the decision about whether to do a dropdown
-            ;; left as a matter of the context (at least for customization); For now leaving though... XXX
-            ;; We have an isComponent ref; do nested form
-            ;; Should this clause just be polymorphic on whether value is a map or not?
-            [{:db/valueType :db.type/ref :db/isComponent true} _]
-            ;; Need to assoc in the root node context here
-            (let [sub-expr (some #(get % attr-ident) pull-expr) ;; XXX This may not handle a ref not in {}
-                  ;; Need to handle situation of a recur point ('...) as a specification; Should be the context pull root, or the passed in expr, if needed
-                  sub-expr (if (= sub-expr '...) (or (:dat.view/root-pull-expr context) pull-expr) sub-expr)
-                  context (if (:dat.view/root-pull-expr context)
-                            context
-                            (assoc context :dat.view/root-pull-expr pull-expr))]
-              ;(when-not (= (:db/cardinality attr) :db.cardinality/many)
-              ;;(nil? value))
-              [pull-form app context sub-expr value])
-            ;; This is where we can insert something that catches certain things and handles them separately, depending on context
-            ;[{:db/valueType :db.type/ref} {:dat.view.level/attr {?}}]
-            ;[pull-form app context (get pull-expr value)]
-            ;; Non component entity; Do dropdown select...
-            [{:db/valueType :db.type/ref} _]
-            [select-entity-input app eid attr-ident value]
-            ;; Need separate handling of datetimes
-            [{:db/valueType :db.type/instant} _]
-            [datetime-selector app eid attr-ident value]
-            ;; Booleans should be check boxes
-            [{:db/valueType :db.type/boolean} _]
-            [boolean-selector app eid attr-ident value]
-            ;; For numeric inputs, want to style a little differently
-            [{:db/valueType (:or :db.type/float :db.type/double :db.type/integer :db.type/long)} _]
-            [re-com/input-text
-             :model (str value)
-             :width "130px"
-             :on-change (make-change-handler app eid attr-ident value)]
-            ;; Misc; Simple input, but maybe do a dynamic type dispatch as well for customization...
-            :else
-            [re-com/input-text
-             :model (str value) ;; just to make sure...
-             :width (if (= attr-ident :db/doc) "350px" "200px")
-             :on-change (make-change-handler app eid attr-ident value)]))))
+   [represent app [::input-for (assoc context ::pull-expr pull-expr)] [eid attr-ident value]]))
+
+(representation/register-representation
+  ::input-for
+  (fn [app [_ context-data] [eid attr-ident value]]
+    ;; TODO Need to rewrite in terms of representations
+    (let [attr @(attribute-signature-reaction app attr-ident)
+          pull-expr (::pull-expr context-data)]
+      (match [attr context-data]
+        ;; The first two forms here have to be compbined and the decision about whether to do a dropdown
+        ;; left as a matter of the context (at least for customization); For now leaving though... XXX
+        ;; We have an isComponent ref; do nested form
+        ;; Should this clause just be polymorphic on whether value is a map or not?
+        [{:db/valueType :db.type/ref :db/isComponent true} _]
+        ;; Need to assoc in the root node context here
+        (let [sub-expr (some #(get % attr-ident) pull-expr) ;; XXX This may not handle a ref not in {}
+              ;; Need to handle situation of a recur point ('...) as a specification; Should be the context pull root, or the passed in expr, if needed
+              sub-expr (if (= sub-expr '...) (or (:dat.view/root-pull-expr context-data) pull-expr) sub-expr)
+              context (if (:dat.view/root-pull-expr context-data)
+                        context-data
+                        (assoc context-data :dat.view/root-pull-expr pull-expr))]
+          ;(when-not (= (:db/cardinality attr) :db.cardinality/many)
+          ;;(nil? value))
+          [pull-form app context sub-expr value])
+        ;; This is where we can insert something that catches certain things and handles them separately, depending on context
+        ;[{:db/valueType :db.type/ref} {:dat.view.level/attr {?}}]
+        ;[pull-form app context-data (get pull-expr value)]
+        ;; Non component entity; Do dropdown select...
+        [{:db/valueType :db.type/ref} _]
+        [select-entity-input app eid attr-ident value]
+        ;; Need separate handling of datetimes
+        [{:db/valueType :db.type/instant} _]
+        [datetime-selector app eid attr-ident value]
+        ;; Booleans should be check boxes
+        [{:db/valueType :db.type/boolean} _]
+        [boolean-selector app eid attr-ident value]
+        ;; For numeric inputs, want to style a little differently
+        [{:db/valueType (:or :db.type/float :db.type/double :db.type/integer :db.type/long)} _]
+        [re-com/input-text
+         :model (str value)
+         :width "130px"
+         :on-change (make-change-handler app eid attr-ident value)]
+        ;; Misc; Simple input, but maybe do a dynamic type dispatch as well for customization...
+        :else
+        [re-com/input-text
+         :model (str value) ;; just to make sure...
+         :width (if (= attr-ident :db/doc) "350px" "200px")
+         :on-change (make-change-handler app eid attr-ident value)]))))
 
 
 (defn create-type-reference
@@ -999,6 +1015,7 @@
      [:db/add eid attr-ident -1]]))
 
 
+;; TODO Need to rewrite in terms of representations
 (defn attr-type-selector
   [type-idents selected-type ok-fn cancel-fn]
   ;; Right now only supports one; need to make a popover or something that asks you what type you want to
@@ -1029,6 +1046,7 @@
 ;; All this skeleton stuff is a bit anoying; these things are what the user should be specifying, not the
 ;; other way around
 ;; Should strip down and simplify field-for-skeleton; Doesn't need to be this complex XXX
+;; TODO Need to rewrite in terms of representations, or write this one in terms of a layout, if that becomes a separate notion
 (defn field-for-skeleton
   [app attr-ident controls inputs]
   [re-com/v-box
@@ -1046,6 +1064,7 @@
      :style {:flex-flow "column wrap"}
      :children inputs]]])
 
+;; TODO Need to rewrite in terms of represetnations
 (defn add-reference-button
   "Simple add reference button"
   ([tooltip on-click-fn]
@@ -1063,6 +1082,7 @@
   [tooltip type-ident])
 
 ;; We should rewrite the main use case below to use this function istead of the one above; reduce complexity
+;; TODO Need to rewrite in terms of representation
 (defn add-reference-button-modal
   "An add reference button that pops up a modal form with a submit button.
   modal-popup arg should be a component that takes param:
@@ -1082,65 +1102,78 @@
 
 
 ;; Again; need to think about the right way to pass through the attribute data here
+;; TODO Need to rewrite in terms of representation
+;
+(representation/register-representation
+  ::fields-for
+  ;; So first we get attr-signature and config
+  ;; TODO Should make this also ok with not passing in the value(s) so that it can pull for you...
+  (fn [app [_ context-data] [eid attr-ident value]]
+    (let [attr-sig (attribute-signature-reaction app attr-ident)
+          ;; Should move all this local state in conn db if possible... XXX
+          activate-type-selector? (r/atom false)
+          selected-type (r/atom nil)
+          cancel-fn (fn []
+                      (reset! activate-type-selector? false)
+                      (reset! selected-type nil)
+                      false)
+          ok-fn (fn []
+                  (reset! activate-type-selector? false)
+                  (create-type-reference app eid attr-ident @selected-type)
+                  (reset! selected-type nil)
+                  false)]
+      ;; TODO Need to add sorting functionality here...
+      (fn [app [_ context-data] [eid attr-ident value]]
+        (let [context @(component-context app ::field-for {:dat.view/locals context-data :dat.view/attr attr-ident})
+              pull-expr (::pull-expr context)
+              conn (:conn app)
+              eid (:db/id @(safe-pull conn '[*] eid))
+              value (or value (get @(safe-pull conn [attr-ident] eid) attr-ident))]
+          ;; Ug... can't get around having to duplicate :field and label-view
+          (when (and eid
+                     (not (:attribute/hidden? context)))
+            (let [type-idents (:attribute.ref/types @attr-sig)]
+              ;; Are controls still separated this way? Should they be?
+              [:div (:dom/attrs context)
+               ;[debug "type-idents:" type-idents]
+               ;[debug "attr-sig:" @attr-sig]
+               ;[:div (get-in context [:dat.view.level/attr :dat.view/controls])]
+               [field-for-skeleton app attr-ident
+                ;; Right now these can't "move" because they don't have keys XXX Should fix with another component
+                ;; nesting...
+                ;; All of these things should be rewritten in terms of controls, and controls should be more cleanly separated out in context XXX
+                [(when (= :db.cardinality/many (:db/cardinality @attr-sig))
+                   ^{:key (hash :add-reference-button)}
+                   [add-reference-button (fn []
+                                           (cond
+                                             (> (count type-idents) 1)
+                                             (reset! activate-type-selector? true)
+                                             ;; Should specifically catch this and let user select from any possible type; or maybe a defaults? context?
+                                             (= (count type-idents) 0)
+                                             (js/alert "No types associated with this attribute; This will be allowed in the future, till then please find/file a GH issue to show interest.")
+                                             :else
+                                             (create-type-reference app eid attr-ident (first type-idents))))])
+                 ;; Need a flexible way of specifying which attributes need special functions associated in form
+                 (when @activate-type-selector?
+                   ^{:key (hash :attr-type-selector)}
+                   [re-com/modal-panel
+                    :child [attr-type-selector type-idents selected-type ok-fn cancel-fn]])]
+                ;; Then for the actual value...
+                ;(for [value (or (seq (utils/deref-or-value value)) [nil])]
+                (for [value (let [value (utils/deref-or-value value)]
+                              (or
+                                (and (sequential? value) (seq value))
+                                (and value [value])
+                                [nil]))]
+                  ^{:key (hash {:component :field-for :eid eid :attr-ident attr-ident :value value})}
+                  [represent app [::input-for context-data] [eid attr-ident value]])]])))))))
+                  ;[input-for app context-data pull-expr eid attr-ident value])]])))))))
+
 (defn field-for
   [app context pull-expr eid attr-ident value]
-  ;; So first we get attr-signature and config
-  (let [attr-sig (attribute-signature-reaction app attr-ident)
-        config (component-context app ::field-for {:dat.view/locals context :dat.view/attr attr-ident})
-        ;; Should move all this local state in conn db if possible... XXX
-        activate-type-selector? (r/atom false)
-        selected-type (r/atom nil)
-        cancel-fn (fn []
-                    (reset! activate-type-selector? false)
-                    (reset! selected-type nil)
-                    false)
-        ok-fn (fn []
-                (reset! activate-type-selector? false)
-                (create-type-reference app eid attr-ident @selected-type)
-                (reset! selected-type nil)
-                false)]
-    ;; XXX Need to add sorting functionality here...
-    (fn [app context pull-expr eid attr-ident value]
-      ;; Ug... can't get around having to duplicate :field and label-view
-      (when (and @(posh/q '[:find ?eid :in $ ?eid :where [?eid]] (:conn app))
-                 (not (:attribute/hidden? @config)))
-        (let [type-idents (:attribute.ref/types @attr-sig)]
-          ;; Are controls still separated this way? Should they be? XXX
-          [:div (:dom/attrs @config)
-           ;[debug "type-idents:" type-idents]
-           ;[debug "attr-sig:" @attr-sig]
-           ;[:div (get-in @config [:dat.view.level/attr :dat.view/controls])]
-           [field-for-skeleton app attr-ident
-            ;; Right now these can't "move" because they don't have keys XXX Should fix with another component
-            ;; nesting...
-            ;; All of these things should be rewritten in terms of controls, and controls should be more cleanly separated out in config XXX
-            [(when (= :db.cardinality/many (:db/cardinality @attr-sig))
-               ^{:key (hash :add-reference-button)}
-               [add-reference-button (fn []
-                                       (cond
-                                         (> (count type-idents) 1)
-                                         (reset! activate-type-selector? true)
-                                         ;; Should specifically catch this and let user select from any possible type; or maybe a defaults? context?
-                                         (= (count type-idents) 0)
-                                         (js/alert "No types associated with this attribute; This will be allowed in the future, till then please find/file a GH issue to show interest.")
-                                         :else
-                                         (create-type-reference app eid attr-ident (first type-idents))))])
-             ;; Need a flexible way of specifying which attributes need special functions associated in form
-             (when @activate-type-selector?
-               ^{:key (hash :attr-type-selector)}
-               [re-com/modal-panel
-                :child [attr-type-selector type-idents selected-type ok-fn cancel-fn]])]
-            ;; Then for the actual value...
-            ;(for [value (or (seq (utils/deref-or-value value)) [nil])]
-            (for [value (let [value (utils/deref-or-value value)]
-                          (or
-                            (and (sequential? value) (seq value))
-                            (and value [value])
-                            [nil]))]
-              ^{:key (hash {:component :field-for :eid eid :attr-ident attr-ident :value value})}
-              [:div
-               ;[debug "value:" value]
-               [input-for app context pull-expr eid attr-ident value]])]])))))
+  (let [context (assoc context ::pull-expr pull-expr)]
+    [represent app [::fields-for context] [eid attr-ident value]]))
+
 
 (defn get-remote-eid
   [app eid]
@@ -1198,6 +1231,7 @@
    (pull-with-extra-fields pull-expr [:db/id :db/ident :e/type])))
 
 
+;; TODO Rewrite in terms of representations
 (defn pull-form
   "Renders a form with defaults from pull data, or for an existing entity, subject to optional specification of a
   pull expression (possibly annotated with context metadata), a context map"
@@ -1224,7 +1258,7 @@
 
 (defn edit-entity-form
   [app remote-eid]
-  (if-let [eid @(posh/q '[:find ?e . :in $ ?remote-eid :where [?e :datsync.remote.db/id ?remote-eid]] (:conn app) remote-eid)]
+  (if-let [eid (:db/id @(safe-pull (:conn app) '[:dat.sync.remote.db/id :db/id] [:dat.sync.remote.db/id remote-eid]))]
     [re-com/v-box :children [[pull-data-form app eid]]]
     [loading-notification "Please wait; form data is loading."]))
 

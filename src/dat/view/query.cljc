@@ -5,5 +5,6 @@
      [?attr :db/ident ?attr-ident]
      [?attr :db/valueType ?value-type]
      [?value-type :db/ident ?value-type-ident]]])
+    ;[(type-attr ?type ?attr)]])
 
 

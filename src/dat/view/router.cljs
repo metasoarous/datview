@@ -47,11 +47,10 @@
   (dispatcher/dispatch! (:dispatcher app) [::path-change js/window.location.pathname]))
 
 
-;;
-
 (reactor/register-handler ::path-change
   (fn [app db [_ new-path]]
     (reactor/resolve-to app db [[:dat.view.settings/update [::current-path new-path]]])))
+
 
 (defn make-handler-fn
   [app]
@@ -72,12 +71,17 @@
 ;; XXX Should probably handle this through a handler... but for now...
 (defn set-route!
   [app {:as route :keys [handler route-params]}]
-  (let [flattened-params (-> route-params seq flatten)
-        path-for-route (apply bidi/path-for routes/routes handler flattened-params)]
+  (log/info "set-route! on route:" route)
+  (let [flattened-params (-> route-params seq flatten vec)
+        _ (log/info "flattened-params:" flattened-params)
+        path-for-route (apply bidi/path-for
+                              (utils/deref-or-value (or (:routes app) routes/routes))
+                              handler
+                              flattened-params)]
     (if-not path-for-route
       (do
-        (println "params:" (with-out-str (pr-str flattened-params)))
-        (println "path:" path-for-route)
+        (log/error "Hit bad route with params:" (with-out-str (pr-str flattened-params)))
+        (log/error "Bad route path:" path-for-route)
         (js/alert "Hit a bad route: " (pr-str route-params)))
       (.setToken (:history app)
                  path-for-route))))

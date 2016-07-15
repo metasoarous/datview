@@ -16,7 +16,7 @@
                                      "/edit" :edit-entity}
         ;; Should be able to add guard here, but wasn't able... Need to try again
         ;["entity/create/" [#"[\d[a-zA-Z]\-]*" :datview.creation/token]] :create-entity
-        ["entity/create/" :datview.creation/token] :create-entity
+        ["entity/create/" :dat.view.creation/token] :create-entity
         ;; Create an entity with a given type
         ;; (not sure why keyword isn't working here.. should; if not need to write workarounds...
         ;["create/" [keyword :e/type]] :create-entity

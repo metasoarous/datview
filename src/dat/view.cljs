@@ -1102,7 +1102,6 @@
 
 
 ;; Again; need to think about the right way to pass through the attribute data here
-;; TODO Need to rewrite in terms of representation
 ;
 (representation/register-representation
   ::fields-for
@@ -1135,9 +1134,6 @@
             (let [type-idents (:attribute.ref/types @attr-sig)]
               ;; Are controls still separated this way? Should they be?
               [:div (:dom/attrs context)
-               ;[debug "type-idents:" type-idents]
-               ;[debug "attr-sig:" @attr-sig]
-               ;[:div (get-in context [:dat.view.level/attr :dat.view/controls])]
                [field-for-skeleton app attr-ident
                 ;; Right now these can't "move" because they don't have keys XXX Should fix with another component
                 ;; nesting...
@@ -1169,6 +1165,7 @@
                   [represent app [::input-for context-data] [eid attr-ident value]])]])))))))
                   ;[input-for app context-data pull-expr eid attr-ident value])]])))))))
 
+;; TODO Need to rewrite with saner arity
 (defn field-for
   [app context pull-expr eid attr-ident value]
   (let [context (assoc context ::pull-expr pull-expr)]
@@ -1249,9 +1246,12 @@
        ;; The meat of the logic
        (let [context @(component-context app ::pull-form {:dat.view/locals context})]
          [:div (:dom/attrs context)
-          (for [attr-ident (pull-expr-attributes app pull-expr)]
-            ^{:key (hash attr-ident)}
-            [field-for app context pull-expr (:db/id pull-data-or-eid) attr-ident (get pull-data-or-eid attr-ident)])])))))
+          (for [attr-ident (distinct (pull-expr-attributes app pull-expr))]
+            (let [context [::fields-for (merge context ::pull-expr pull-expr)]
+                  data [(:db/id pull-data-or-eid) attr-ident (get pull-data-or-eid attr-ident)]]
+              ^{:key (hash attr-ident)}
+              [represent app context data]))])))))
+            ;[field-for app context pull-expr (:db/id pull-data-or-eid) attr-ident (get pull-data-or-eid attr-ident)])])))))
 
 ;; We should use this to grab the pull expression for a given chunk of data
 ;(defn pull-expr-for-data

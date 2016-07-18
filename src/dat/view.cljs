@@ -222,16 +222,31 @@
                 @(posh/pull conn pattern eid)
                 {:db/id nil}))))))))
 
+
+(def safe-q
+  "A version of posh/q without any transaction pattern matching filters (al a posh) that delegates directly to d/q, and
+  wraps in a reaction"
+  (memoize
+    (fn [query conn & args]
+      (reaction
+        (let [conn (as-reaction conn)
+              db (utils/deref-or-value conn)
+              args (mapv utils/deref-or-value args)]
+          (apply d/q query db args))))))
+
+;; QUESTION Should this be wrapped in a reaction as well?
 (defn pull-many
   [app pattern eids]
-  (let [conn-reaction (as-reaction (:conn app))]
-    (reaction (d/pull-many @conn-reaction pattern eids))))
+  (map (partial safe-pull (:conn app) pattern)
+    (utils/deref-or-value eids)))
 
 
 (def pull-attr
   "Wraps safe pull, and etracts the results for a given attr"
   (memoize
-    (fn [conn eid attr-ident])))
+    (fn [conn eid attr-ident]
+      (reaction
+        (get @(safe-pull conn [attr-ident] eid) attr-ident)))))
 
 
 
@@ -421,14 +436,14 @@
 (representation/register-representation
   ::pull-summary-string
   (fn [_ _ pull-data]
-    [:span
+    ;[:span
      (match [pull-data]
        [{:e/name name}] name
        [{:attribute/label label}] label
        [{:db/ident ident}] (name ident)
        [{:e/type {:db/ident type-ident}}] (str (name type-ident) " instance")
        ;; A terrible assumption really, but fine enough for now
-       :else (pr-str pull-data))]))
+       :else (pr-str pull-data))))
 
 (defn pull-summary-string
   ([app pull-data]
@@ -710,7 +725,7 @@
                  [represent app [::pull-summary-view context-data] pull-data]]]
               ;; XXX TODO Questions:
               ;; Need a react-id function that lets us repeat attrs when needed
-              (for [attr-ident (distinct (pull-attributes pull-expr pull-data))]
+              (for [attr-ident (pull-attributes pull-expr pull-data)]
                 ^{:key (hash attr-ident)}
                 [represent app [::attr-view (assoc context-data :db.attr/ident attr-ident)] (get pull-data attr-ident)])])])))))
 
@@ -838,38 +853,63 @@
                        (when old-value
                          [[:db/retract eid attr-ident old-value]]))))))
 
+(defn inspect
+  [stuff]
+  (doseq [x stuff]
+    (log/debug "label: " (:label x)))
+  stuff)
 
+(def ref-attr-options
+  (memoize
+    (fn
+      ([app attr-ident]
+       (ref-attr-options app attr-ident :db/id))
+      ([app attr-ident sort-key]
+       (log/debug "Calling ref-attr-options with attr-ident:" attr-ident)
+       (->>
+         (safe-q '[:find [(pull ?e [:db/id :db/ident * {:e/type [*]}]) ...]
+                   :in $ % ?attr
+                   :where [?attr :attribute.ref/types ?type]
+                          (type-instance ?type ?e)]
+                 (:conn app)
+                 query/rules
+                 [:db/ident attr-ident]))))))
+         ;deref
+         ;(mapv
+         ;  (fn [pull-data]
+         ;    (assoc pull-data
+         ;      ;; XXX pull-summary-string does not actually return a string... need to fix this
+         ;      :label (or (pull-summary-string app pull-data) "NA")
+         ;      :id (:db/id pull-data))))
+         ;; XXX There needs to be more control over the ordering here, via context or something; Explicitly passing options is a punt
+         ;inspect
+         ;(sort-by :db/id)
+         ;vec
+         ;reaction)))))
+
+;; TODO Need constext here for a better sort-by specification; switch to representation
 (defn select-entity-input
-  {:todo ["Finish..."
-          "Create some attribute indicating what entity types are possible values; other rules?"]}
   ([app eid attr-ident value]
     ;; XXX value arg should be safe as a reaction here
-   (let [;options @(attribute-signature-reaction app attr-ident)]
-         options (->>
-                   @(posh/q '[:find ?eid
-                              :in $ ?attr
-                              :where [?attr :attribute.ref/types ?type]
-                                     [?eid :e/type ?type]]
-                            (:conn app)
-                            [:db/ident attr-ident])
-                   ;; XXX Oh... should we call entity-name entity-label? Since we're really using as the label
-                   ;; here?
-                   (pull-many app '[*])
-                   (mapv (fn [pull-data] (assoc pull-data :label (pull-summary-string app {} pull-data)
-                                                          :id (:db/id pull-data))))
-                   (sort-by :label))]
+   (let [options (ref-attr-options app attr-ident :label)]
+         ;; Should extract this as something memoized
      ;; Remove this div; just for debug XXX
-     [:div
-      ;[debug "options:" options]
-      [select-entity-input app eid attr-ident value options]]))
+     [select-entity-input app eid attr-ident value options]))
   ([app eid attr-ident value options]
-   [re-com/single-dropdown
-    :style {:min-width "150px"}
-    :choices options
-    ;; TODO Not sure if this will break things or not; have to test
-    ;:model (:db/id value)
-    :model (or (:db/id value) value)
-    :on-change (partial apply-reference-change! app eid attr-ident (:db/id value))]))
+   (let [value (utils/deref-or-value value)
+         value (or (:db/id value)
+                   (and (vector? value) @(pull-attr (:conn app) value :db/id))
+                   value)]
+     [re-com/single-dropdown
+      :style {:min-width "150px"}
+      :choices options
+      ;; TODO Not sure if this will break things or not; have to test
+      ;:model (:db/id value)
+      :id-fn :db/id
+      ;; For now hard coding this... For some reason using the summary function here is messing everything up
+      :label-fn :e/name
+      :model value
+      :on-change (partial apply-reference-change! app eid attr-ident value)])))
 
 
 ;; Simple md (markdown) component; Not sure if we really need to include this in dat.view or not...
@@ -1123,14 +1163,16 @@
                   false)]
       ;; TODO Need to add sorting functionality here...
       (fn [app [_ context-data] [eid attr-ident value]]
+        (log/debug "Rendering fields-for" attr-ident)
         (let [context @(component-context app ::field-for {:dat.view/locals context-data :dat.view/attr attr-ident})
               pull-expr (::pull-expr context)
               conn (:conn app)
               eid (:db/id @(safe-pull conn '[*] eid))
               value (or value (get @(safe-pull conn [attr-ident] eid) attr-ident))]
           ;; Ug... can't get around having to duplicate :field and label-view
+          (log/debug "more stuff for" attr-ident)
           (when (and eid
-                     (not (:attribute/hidden? context)))
+                     (not (or (:attribute/hidden? context) (= :db/id attr-ident))))
             (let [type-idents (:attribute.ref/types @attr-sig)]
               ;; Are controls still separated this way? Should they be?
               [:div (:dom/attrs context)
@@ -1182,15 +1224,15 @@
     (let [entity (d/pull @(:conn app) [:e/type :datsync.remote.db/id] eid)]
       (js/console.log (str "Deleting entity: " eid))
       (match [entity]
-             ;; may need the ability to dispatch in here;
-             :else
-             (send-tx! app [[:db.fn/retractEntity eid]])))))
+        ;; may need the ability to dispatch in here;
+        :else
+        (send-tx! app [[:db.fn/retractEntity eid]])))))
 
 
-(defn pull-expression-context
-  [pull-expr]
-  ;; Have to get this to recursively pull out metadata from reference attributes, and nest it according to context schema XXX
-  (meta pull-expr))
+;(defn pull-expression-context
+;  [pull-expr]
+;  ;; Have to get this to recursively pull out metadata from reference attributes, and nest it according to context schema XXX
+;  (meta pull-expr))
 
 (defn rest-attributes
   "Grabs attributes corresponding to * pulls, not otherwise fetched at the top level of a pull-expr"
@@ -1205,10 +1247,16 @@
        (remove (keys pull-data))))
 
 
+;; The following three functions are currently not being used, and I'm not sure if they need to be. They overlap with
+;; the `pull-attributes` function.
+
 (defn pull-expr-attributes
+  ;; TODO Take into account hidden
   [app pull-expr]
   (->> pull-expr
        (map (fn [x] (if (map? x) (keys x) x)))
+       ;; If we keep this...
+       ;(remove #{'*})
        flatten
        distinct))
 
@@ -1228,7 +1276,38 @@
    (pull-with-extra-fields pull-expr [:db/id :db/ident :e/type])))
 
 
-;; TODO Rewrite in terms of representations
+(defn pull-attr-values
+  [app pull-expr pull-data]
+  (->> (pull-expr-attributes app pull-expr)
+       (concat (keys pull-data))
+       (distinct)
+       (map (fn [attr-ident] [attr-ident (get pull-data attr-ident)]))
+       (into {})))
+
+(representation/register-representation
+  ::pull-form
+  (fn [app [_ context-data] [pull-expr pull-data-or-id]]
+    (let [pull-data-or-id (utils/deref-or-value pull-data-or-id)
+          local-context @(component-context app ::pull-form {:dat.view/locals context-data})
+          eid (cond
+                ;; id or lookup ref
+                ((some-fn integer? vector?) pull-data-or-id) pull-data-or-id
+                ;; presumably, data returned from said query
+                (map? pull-data-or-id) (:db/id pull-data-or-id))]
+      (cond
+        ; again, id or lookup ref
+        ((some-fn integer? vector?) pull-data-or-id)
+        (let [pull-data (safe-pull (:conn app) pull-expr pull-data-or-id)]
+          [represent app [::pull-form context-data] [pull-expr pull-data]])
+        ; again, id or lookup ref
+        (map? pull-data-or-id)
+        [:div (:dom/attrs local-context)
+         ;(for [[attr-ident values] (pull-attr-values app pull-expr pull-data-or-id)]
+         (for [attr-ident (pull-attributes pull-expr pull-data-or-id)]
+           (let [values (get pull-data-or-id attr-ident)]
+             ^{:key (hash attr-ident)}
+             [represent app [::fields-for context-data] [eid attr-ident values]]))]))))
+
 (defn pull-form
   "Renders a form with defaults from pull data, or for an existing entity, subject to optional specification of a
   pull expression (possibly annotated with context metadata), a context map"
@@ -1236,30 +1315,45 @@
   ([app pull-data-or-eid]
    (pull-form app '[*] pull-data-or-eid))
   ([app pull-expr pull-data-or-eid]
-   (pull-form app (pull-expression-context pull-expr) pull-expr pull-data-or-eid))
+   (pull-form app (meta-context pull-expr) pull-expr pull-data-or-eid))
   ([app context pull-expr pull-data-or-eid]
    (when pull-data-or-eid
-     (if (integer? pull-data-or-eid)
-       (if-let [current-data @(safe-pull (:conn app) pull-expr pull-data-or-eid)]
-         [pull-form app context pull-expr current-data]
-         [loading-notification "Please wait; loading data."])
-       ;; The meat of the logic
-       (let [context @(component-context app ::pull-form {:dat.view/locals context})]
-         [:div (:dom/attrs context)
-          (for [attr-ident (distinct (pull-expr-attributes app pull-expr))]
-            (let [context [::fields-for (merge context ::pull-expr pull-expr)]
-                  data [(:db/id pull-data-or-eid) attr-ident (get pull-data-or-eid attr-ident)]]
-              ^{:key (hash attr-ident)}
-              [represent app context data]))])))))
-            ;[field-for app context pull-expr (:db/id pull-data-or-eid) attr-ident (get pull-data-or-eid attr-ident)])])))))
+     [represent app [::pull-form context] [pull-expr pull-data-or-eid]])))
+
+
+;(defn pull-form
+;  "Renders a form with defaults from pull data, or for an existing entity, subject to optional specification of a
+;  pull expression (possibly annotated with context metadata), a context map"
+;  ;; How to make this language context based...
+;  ([app pull-data-or-eid]
+;   (pull-form app '[*] pull-data-or-eid))
+;  ([app pull-expr pull-data-or-eid]
+;   (pull-form app (meta-context pull-expr) pull-expr pull-data-or-eid))
+;  ([app context pull-expr pull-data-or-eid]
+;   (when pull-data-or-eid
+;     (let [pull-expr (or pull-expr '[*])] ; should really be generating from type here
+;       (if (or (integer? pull-data-or-eid) (vector? pull-data-or-eid))
+;         (if-let [current-data @(safe-pull (:conn app) pull-expr pull-data-or-eid)]
+;           [pull-form app context pull-expr current-data]
+;           [loading-notification "Please wait; loading data."])
+;         ;; The meat of the logic; then a map/entity/pull
+;         (let [context @(component-context app ::pull-form {:dat.view/locals context})]
+;           [:div (:dom/attrs context)
+;            (for [attr-ident (distinct (pull-expr-attributes app pull-expr))]
+;              (let [context [::fields-for (merge context ::pull-expr pull-expr)]
+;                    data [(:db/id pull-data-or-eid) attr-ident (get pull-data-or-eid attr-ident)]]
+;                ^{:key (hash attr-ident)}
+;                [represent app context data])
+;              [field-for app context pull-expr (:db/id pull-data-or-eid) attr-ident (get pull-data-or-eid attr-ident)])]))))))
 
 ;; We should use this to grab the pull expression for a given chunk of data
 ;(defn pull-expr-for-data
 
+
 (defn edit-entity-form
-  [app remote-eid]
-  (if-let [eid (:db/id @(safe-pull (:conn app) '[:dat.sync.remote.db/id :db/id] [:dat.sync.remote.db/id remote-eid]))]
-    [re-com/v-box :children [[pull-data-form app eid]]]
+  [app eid]
+  (if-let [eid (:db/id @(safe-pull (:conn app) '[:dat.sync.remote.db/id :db/id]) eid)]
+    [re-com/v-box :children [[pull-form app eid]]]
     [loading-notification "Please wait; form data is loading."]))
 
 
@@ -1268,7 +1362,7 @@
 (defn pull-data-form
   [app pull-expr eid]
   (if-let [current-data @(safe-pull (:conn app) pull-expr eid)]
-    [re-com/v-box :children [[edit-entity-form app eid]]]
+    [re-com/v-box :children [[pull-form app pull-expr eid]]]
     [loading-notification "Please wait; loading data."]))
 
 ;(defn pull-form
@@ -1363,36 +1457,6 @@
 ;(s/def ::pull-expr
 ;  (s/* (s/or keyword? map? symbol?)))
 
-;(defn pull-walk
-;  "Traverses form, an arbitrary data structure.  inner and outer are
-;  functions.  Applies inner to each element of form, building up a
-;  data structure of the same type, then applies outer to the result.
-;  Recognizes all Clojure data structures. Consumes seqs as with doall."
-;
-;  {:added "1.1"}
-;  [inner outer form]
-;  (cond
-;    (list? form) (outer (apply list (map inner form)))
-;    ;(instance? clojure.lang.IMapEntry form) (outer (vec (map inner form)))
-;    (map? form)
-;    (seq? form) (outer (doall (map inner form)))
-;    ;(instance? clojure.lang.IRecord form
-;    ;  (outer (reduce (fn [r x] (conj r (inner x))) form form)))
-;    (coll? form) (outer (into (empty form) (map inner form)))
-;    :else (outer form)))
-
-;(defn meta-context
-;  [pull-expr]
-;  (walk/walk
-;    ;(partial walk/postwalk meta-context)
-;    (fn [x]
-;      (cond
-;        (map? x) (into {} (map (fn [[k v]] [k (meta-context v)])))
-;        :else (meta-context x)))
-;    meta-context
-;    pull-expr))
-
-
 (defn meta-context
   [pull-expr]
   (let [ref-attrs (filter map? pull-expr)
@@ -1408,30 +1472,6 @@
                [attr-ident (meta-context attr-pull-expr)]))
            (into {}))
       ::non-ref-attrs non-ref-attrs)))
-
-
-;(defn meta-context
-;  [pull-expr]
-;  (walk/postwalk
-;    (fn [data]
-;      (cond
-;        ;; If we're not careful here, we match kv pairs in vectors as vectors themselves
-;        (and (vector? data)
-;             (not (-> data second vector?)))
-;        (assoc
-;          (meta data)
-;          ::pull-for :x
-;          ::orig data
-;          ::non-ref-attrs
-;          (->> data
-;               (remove map?)
-;               vec)
-;          ::ref-attrs
-;          (->> data
-;               (filter map?)
-;               (reduce utils/deep-merge)))
-;        :else data))
-;    pull-expr))
 
 
 

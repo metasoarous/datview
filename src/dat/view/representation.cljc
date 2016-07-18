@@ -63,12 +63,12 @@
              (when-not @collapse?
                [:div
                 [:p "Error"]
-                [:pre e
-                 #?(:cljs (.-stack e))]
+                [:pre (pr-str e)
+                 #?(:cljs (try (.-stack e) (catch :default e "!!!Unable to print stack trace!!!")))]
                 [:p "representation:"]
-                [:pre representation]
+                [:pre (pr-str representation)]
                 [:p "Data:"]
-                [:pre data]])]))))))
+                [:pre (pr-str data)]])]))))))
 
 ;(def resolve-context* nil)
 (defmulti resolve-context*

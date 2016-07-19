@@ -206,21 +206,34 @@
 ;; XXX This will be coming to posh soon, but in case we need it earlier
 
 
+
+(def base-pull
+  [* {:e/type [*]}])
+
+
 (def safe-pull
   "A version of posh/pull where missing lookup refs should behave properly (generally), but also behave more like Datomic than
   DataScript by returning `{:db/id nill}` instead of erroring when passed bad lookup refs."
-  (memoize
-    (fn safe-pull
+  ;(memoize
+    (fn safe-pull*
       [conn pattern eid-or-lookup]
-      (if (int? eid-or-lookup)
+      ;(log/debug "eid-or-lookup" eid-or-lookup)
+      (cond
+        ;; If integer
+        (integer? eid-or-lookup)
         (posh/pull conn pattern eid-or-lookup)
+        ;; Make sure not nil...
+        (nil? eid-or-lookup)
+        (reaction {:db/id nil})
         ;; TODO Hmm... should we be testing here to make sure this is unique and actually a lookup ref
-        (let [eid-rx (posh/q [:find '?e '. :where (into '[?e] eid-or-lookup)] conn)]
+        (vector? eid-or-lookup)
+        (let [_ (log/debug "Running safe pull for lookup:" eid-or-lookup)
+              eid-rx (posh/q [:find '?e '. :where (into '[?e] eid-or-lookup)] conn)]
           (reaction
             (let [eid @eid-rx]
-              (if (int? eid)
+              (if (integer? eid)
                 @(posh/pull conn pattern eid)
-                {:db/id nil}))))))))
+                {:db/id nil})))))))
 
 
 (def safe-q
@@ -247,6 +260,15 @@
     (fn [conn eid attr-ident]
       (reaction
         (get @(safe-pull conn [attr-ident] eid) attr-ident)))))
+
+(def pull-path
+  ;(memoize
+    (fn [conn eid attr-path]
+      ;; Question: Should use cursor?
+      (reaction
+        (get-in
+          @(safe-pull conn (vec (filter keyword? attr-path)) eid)
+          attr-path))))
 
 
 
@@ -959,7 +981,7 @@
 (defn datetime-selector
   [app eid attr-ident value]
   (let [current-value (atom value)]
-    (fn []
+    (fn [app eid attr-ident value]
       [:datetime-selector
        [re-com/datepicker-dropdown :model (cljs-time.coerce/from-date (or @current-value (cljs-time/now)))
         :on-change (partial datetime-date-change-handler app eid attr-ident current-value)]])))
@@ -1250,39 +1272,43 @@
 ;; The following three functions are currently not being used, and I'm not sure if they need to be. They overlap with
 ;; the `pull-attributes` function.
 
-(defn pull-expr-attributes
-  ;; TODO Take into account hidden
-  [app pull-expr]
-  (->> pull-expr
-       (map (fn [x] (if (map? x) (keys x) x)))
-       ;; If we keep this...
-       ;(remove #{'*})
-       flatten
-       distinct))
+;(defn pull-expr-attributes
+;  ;; TODO Take into account hidden
+;  [app pull-expr]
+;  (->> pull-expr
+;       (map (fn [x] (if (map? x) (keys x) x)))
+;       ;; If we keep this...
+;       ;(remove #{'*})
+;       flatten
+;       distinct))
+;
+;
+;(defn pull-with-extra-fields
+;  ([pull-expr extra-fields]
+;   (distinct
+;     (concat
+;       (map
+;         (fn [attr-spec] (if (map? attr-spec)
+;                           (into {} (map (fn [k pull-expr']
+;                                           [k (pull-with-extra-fields pull-expr' extra-fields)])))))
+;         pull-expr)
+;       extra-fields)))
+;  ([pull-expr]
+;    ;; Need to be able to nest in type ident...
+;   (pull-with-extra-fields pull-expr [:db/id :db/ident :e/type])))
+;
+;
+;(defn pull-attr-values
+;  [app pull-expr pull-data]
+;  (->> (pull-expr-attributes app pull-expr)
+;       (concat (keys pull-data))
+;       (distinct)
+;       (map (fn [attr-ident] [attr-ident (get pull-data attr-ident)]))
+;       (into {})))
 
 
-(defn pull-with-extra-fields
-  ([pull-expr extra-fields]
-   (distinct
-     (concat
-       (map
-         (fn [attr-spec] (if (map? attr-spec)
-                           (into {} (map (fn [k pull-expr']
-                                           [k (pull-with-extra-fields pull-expr' extra-fields)])))))
-         pull-expr)
-       extra-fields)))
-  ([pull-expr]
-    ;; Need to be able to nest in type ident...
-   (pull-with-extra-fields pull-expr [:db/id :db/ident :e/type])))
-
-
-(defn pull-attr-values
-  [app pull-expr pull-data]
-  (->> (pull-expr-attributes app pull-expr)
-       (concat (keys pull-data))
-       (distinct)
-       (map (fn [attr-ident] [attr-ident (get pull-data attr-ident)]))
-       (into {})))
+(declare type-pull)
+(declare entity-pull)
 
 (representation/register-representation
   ::pull-form
@@ -1313,7 +1339,7 @@
   pull expression (possibly annotated with context metadata), a context map"
   ;; How to make this language context based...
   ([app pull-data-or-eid]
-   (pull-form app '[*] pull-data-or-eid))
+   [pull-form app @(entity-pull app pull-data-or-eid) pull-data-or-eid])
   ([app pull-expr pull-data-or-eid]
    (pull-form app (meta-context pull-expr) pull-expr pull-data-or-eid))
   ([app context pull-expr pull-data-or-eid]
@@ -1321,49 +1347,21 @@
      [represent app [::pull-form context] [pull-expr pull-data-or-eid]])))
 
 
-;(defn pull-form
-;  "Renders a form with defaults from pull data, or for an existing entity, subject to optional specification of a
-;  pull expression (possibly annotated with context metadata), a context map"
-;  ;; How to make this language context based...
-;  ([app pull-data-or-eid]
-;   (pull-form app '[*] pull-data-or-eid))
-;  ([app pull-expr pull-data-or-eid]
-;   (pull-form app (meta-context pull-expr) pull-expr pull-data-or-eid))
-;  ([app context pull-expr pull-data-or-eid]
-;   (when pull-data-or-eid
-;     (let [pull-expr (or pull-expr '[*])] ; should really be generating from type here
-;       (if (or (integer? pull-data-or-eid) (vector? pull-data-or-eid))
-;         (if-let [current-data @(safe-pull (:conn app) pull-expr pull-data-or-eid)]
-;           [pull-form app context pull-expr current-data]
-;           [loading-notification "Please wait; loading data."])
-;         ;; The meat of the logic; then a map/entity/pull
-;         (let [context @(component-context app ::pull-form {:dat.view/locals context})]
-;           [:div (:dom/attrs context)
-;            (for [attr-ident (distinct (pull-expr-attributes app pull-expr))]
-;              (let [context [::fields-for (merge context ::pull-expr pull-expr)]
-;                    data [(:db/id pull-data-or-eid) attr-ident (get pull-data-or-eid attr-ident)]]
-;                ^{:key (hash attr-ident)}
-;                [represent app context data])
-;              [field-for app context pull-expr (:db/id pull-data-or-eid) attr-ident (get pull-data-or-eid attr-ident)])]))))))
-
-;; We should use this to grab the pull expression for a given chunk of data
-;(defn pull-expr-for-data
-
-
 (defn edit-entity-form
   [app eid]
-  (if-let [eid (:db/id @(safe-pull (:conn app) '[:dat.sync.remote.db/id :db/id]) eid)]
-    [re-com/v-box :children [[pull-form app eid]]]
+  (if-let [eid @(pull-attr (:conn app) eid :db/id)]
+    [re-com/v-box :children [;[debug "Pull data:" @(posh/pull (:conn app) '[* {:e/type [*]}] eid)]
+                             [pull-form app eid]]]
     [loading-notification "Please wait; form data is loading."]))
 
 
 ;; These are our new goals
 
-(defn pull-data-form
-  [app pull-expr eid]
-  (if-let [current-data @(safe-pull (:conn app) pull-expr eid)]
-    [re-com/v-box :children [[pull-form app pull-expr eid]]]
-    [loading-notification "Please wait; loading data."]))
+;(defn pull-data-form
+;  [app pull-expr eid]
+;  (if-let [current-data @(safe-pull (:conn app) pull-expr eid)]
+;    [re-com/v-box :children [[pull-form app pull-expr eid]]]
+;    [loading-notification "Please wait; loading data."]))
 
 ;(defn pull-form
 ;[app pull-expr eid])
@@ -1388,7 +1386,7 @@
 
 ;; XXX Note; recursive isComponent attribute relations break this
 (def type-pull
-  ;(memoize
+  (memoize
     (fn type-pull*
       ([app base-type]
        (type-pull* app {} base-type))
@@ -1446,9 +1444,29 @@
                       (#(with-meta % (merge (meta %) {;:e/type data
                                                       :e/type-ident (:db/ident data)}))))
                  :else data))
-             type-data))))))
-;; This is effectively our metadata model
+             type-data)))))))
 
+
+(def entity-pull
+  ;(memoize
+    (fn entity-pull*
+      [app entity-or-eid]
+      (cond
+        ;; If a map, use id to defer to else case  TODO could look here for type ids first...
+        (map? entity-or-eid)
+        (entity-pull* app (:db/id entity-or-eid))
+        ;; This is where all the real logic is:
+        :else ;; assume eid
+        (let [type-id-rx (pull-path (:conn app) entity-or-eid [:e/type :db/id])]
+          (reaction
+            (if-let [type-id @type-id-rx]
+              @(type-pull app type-id)
+              (do
+                (log/debug "Bad type id for entity-or-eid: " entity-or-eid)
+                base-pull)))))))
+
+
+;; This is effectively our metadata model
 
 ;(s/def ::pull-kv
 ;  ;; Should make this a recursive thing that fully specs...

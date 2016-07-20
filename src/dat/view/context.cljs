@@ -121,19 +121,21 @@
     ([app representation-id]
      (component-context* app representation-id {}))
     ([app representation-id {;; Options, in order of precedence in consequent merging
-                             :keys [dat.view/locals ;; points to local overrides; highest precedence
-                                    ;; When the component is in a scope closed over by some particular attribute:
+                             :as local-context
+                             :keys [;; When the component is in a scope closed over by some particular attribute:
                                     db.attr/ident]}] ;; db/ident of the attribute; precedence below
      (reaction
        (let [base-context @(component-context app)]
-         (if ident
-           (let [attr-sig @(attribute-signature-reaction app ident)]
-             (merge (get-in base-context [:dat.view/base-config representation-id])
-                    (get-in base-context [:dat.view/card-config (:db/cardinality attr-sig) representation-id])
-                    (get-in base-context [:dat.view/value-type-config (:db/valueType attr-sig) representation-id])
-                    (get-in base-context [:dat.view/attr-config ident])))
-           ;; Need to also get the value type and card config by the attr-config if that's all that's present; Shouldn't ever
-           ;; really need to pass in manually XXX
-           (merge (get-in base-context [:dat.view/base-config representation-id])
-                  (utils/deref-or-value locals))))))))
+         (merge
+           (get-in base-context [:dat.view/base-config representation-id])
+           (when ident
+             (let [attr-sig @(attribute-signature-reaction app ident)]
+               (merge
+                 (get-in base-context [:dat.view/card-config (:db/cardinality attr-sig) representation-id])
+                 (get-in base-context [:dat.view/value-type-config (:db/valueType attr-sig) representation-id])
+                 (get-in base-context [:dat.view/attr-config ident]))))
+             ;; Need to also get the value type and card config by the attr-config if that's all that's present; Shouldn't ever
+             ;; really need to pass in manually XXX
+           local-context
+           {::locals local-context}))))))
 

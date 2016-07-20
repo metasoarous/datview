@@ -3,7 +3,8 @@
     #?(:cljs [reagent.core :as r])
     #?(:cljs [reagent.ratom :refer-macros [reaction]])
     [taoensso.timbre :as log]
-    [dat.view.styles :as styles]))
+    [dat.view.styles :as styles]
+    #?(:cljs [dat.view.context :as context])))
 
 
 (defn cljc-atom [init-value]
@@ -75,7 +76,7 @@
   [representation-fn]
   (fn [app [representation-id context-data] data]
     (if-let [representation-id (:dat.view/representation-id context-data)]
-      [represent app [representation-id (dissoc :dat.view/representation-id context-data)] data]
+      [represent app [representation-id (dissoc context-data :dat.view/representation-id)] data]
       [representation-fn app [representation-id context-data] data])))
 
 
@@ -89,15 +90,17 @@
 
 ;(def resolve-context* nil)
 (defmulti resolve-context*
-  (fn [app from-representation to-representation-id]
-    (first from-representation)))
+  (fn [app representation]
+    (first representation)))
 
 (defmethod resolve-context* :default
-  [app from-representation to-representation-id]
-  (second from-representation))
+  [app representation]
+  (second representation))
 
-(defn resolve-context [app from-representation to-representation-id]
-  (resolve-context* app from-representation to-representation-id))
+#?(:cljs
+    (defn resolve-context [app [representation-id context-data]]
+      (let [context-data @(context/component-context app representation-id context-data)]
+        (resolve-context* app [representation-id context-data]))))
 
 
 (defn register-context-resolution
@@ -108,19 +111,24 @@
           resolution-fn (middleware-fn resolution-fn)]
       (resolution-fn app representation representation-id))))
 
-(defn resolve-context-ware
-  [from-representation-id representation-fn]
-  (fn [app [representation-id context-data] data]
-    (representation-fn
-      app
-      [representation-id (resolve-context app [from-representation-id context-data] representation-id)]
-      data)))
+#?(:cljs
+    (defn resolve-context-ware
+      [representation-fn]
+      (fn [app representation data]
+        ;(log/debug "rsolving rep" (pr-str representation))
+        (representation-fn
+          app
+          [(first representation) (resolve-context app representation)]
+          data)))
+   :clj
+    ;; TODO For now...
+    (def resolve-context-ware identity))
+
 
 (defn register-representation
   ([representation-id middleware representation-fn]
    (let [base-middleware [;with-controls
-                          ;representation-override
-                          ;(partial resolve-context-ware representation-id)
+                          resolve-context-ware
                           (partial reactively-register representation-id)
                           (partial handle-errors representation-id)]
          middleware (concat middleware base-middleware)

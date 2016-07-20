@@ -7,12 +7,18 @@
             [dat.view.representation :as representation]
             [dat.view.router :as router]
             [dat.view.utils :as utils]
+            [dat.view.context :as context]
+            [dat.view.query :as query]
+            [dat.view.routes :as routes]
+            [dat.view.settings :as settings]
             [dat.spec.protocols :as protocols]
+    ;; Things outside datsys, but intimately tied to datsys
             [datascript.core :as d]
             [posh.reagent :as posh]
             [reagent.core :as r]
             [reagent.ratom :as ratom]
             [re-com.core :as re-com]
+    ;; Other stuff
             [taoensso.timbre :as log :include-macros true]
             [com.stuartsierra.component :as component]
             [clojure.walk :as walk]
@@ -25,9 +31,7 @@
             [cljs.pprint :as pp]
             [cljs.core.match :as match :refer-macros [match]]
             [markdown.core :as md]
-            [dat.view.query :as query]
-            [dat.view.routes :as routes]
-            [dat.view.settings :as settings]))
+            [dat.view.styles :as styles]))
 
 
 
@@ -110,6 +114,7 @@
         :args (s/cat :app ::app :event ::event)
         :ret (constantly true))
 
+
 ;; TODO Should rename send-remote-tx!
 (defn send-tx!
   "Helper function for dispatching tx messages to server."
@@ -124,34 +129,15 @@
 
 
 
+
+;; Importing styles, etc
+
+(def box-styles styles/box-styles)
+(def h-box-styles styles/h-box-styles)
+(def v-box-styles styles/v-box-styles)
+(def bordered-box-style styles/bordered-box-style)
+
 ;; ## Metadata view specification structure defaults
-
-(def ^:dynamic box-styles
-  {:display "inline-flex"
-   :flex-wrap "wrap"})
-
-(def ^:dynamic h-box-styles
-  (merge box-styles
-         {:flex-direction "row"}))
-
-(def ^:dynamic v-box-styles
-  (merge box-styles
-         {:flex-direction "column"}))
-
-(def bordered-box-style
-  {:border "2px solid grey"
-   :margin "3px"
-   :background-color "#E5FFF6"})
-
-(def default-pull-data-view-style
-  (merge h-box-styles
-         {:padding "8px 15px"
-          :width "100%"}))
-
-(def default-attr-view-style
-  (merge v-box-styles
-         {:padding "5px 12px"}))
-
 
 (defn box
   "Prefers children over child"
@@ -191,212 +177,32 @@
 
 
 
-
-;; ## Reactions
-
-(defn as-reaction
-  "Treat a regular atom as though it were a reaction"
-  [vanilla-atom]
-  (let [trigger (r/atom 0)]
-    (add-watch vanilla-atom :as-reaction-trigger (fn [& args] (swap! trigger inc)))
-    (reaction
-      @trigger
-      @vanilla-atom)))
-
-;; XXX This will be coming to posh soon, but in case we need it earlier
-
-
-
 (def base-pull
   [* {:e/type [*]}])
 
 
-(def safe-pull
-  "A version of posh/pull where missing lookup refs should behave properly (generally), but also behave more like Datomic than
-  DataScript by returning `{:db/id nill}` instead of erroring when passed bad lookup refs."
-  ;(memoize
-    (fn safe-pull*
-      [conn pattern eid-or-lookup]
-      ;(log/debug "eid-or-lookup" eid-or-lookup)
-      (cond
-        ;; If integer
-        (integer? eid-or-lookup)
-        (posh/pull conn pattern eid-or-lookup)
-        ;; Make sure not nil...
-        (nil? eid-or-lookup)
-        (reaction {:db/id nil})
-        ;; TODO Hmm... should we be testing here to make sure this is unique and actually a lookup ref
-        (vector? eid-or-lookup)
-        (let [_ (log/debug "Running safe pull for lookup:" eid-or-lookup)
-              eid-rx (posh/q [:find '?e '. :where (into '[?e] eid-or-lookup)] conn)]
-          (reaction
-            (let [eid @eid-rx]
-              (if (integer? eid)
-                @(posh/pull conn pattern eid)
-                {:db/id nil})))))))
+
+;; ## Reactions
+
+(def deref-or-value utils/deref-or-value)
+(def deep-merge utils/deep-merge)
+(def as-reaction utils/as-reaction)
+(def safe-pull utils/safe-pull)
+(def safe-q utils/safe-q)
+(def pull-many utils/pull-many)
+(def pull-attr utils/pull-attr)
+(def pull-path utils/pull-path)
 
 
-(def safe-q
-  "A version of posh/q without any transaction pattern matching filters (al a posh) that delegates directly to d/q, and
-  wraps in a reaction"
-  (memoize
-    (fn [query conn & args]
-      (reaction
-        (let [conn (as-reaction conn)
-              db (utils/deref-or-value conn)
-              args (mapv utils/deref-or-value args)]
-          (apply d/q query db args))))))
+;; Context
 
-;; QUESTION Should this be wrapped in a reaction as well?
-(defn pull-many
-  [app pattern eids]
-  (map (partial safe-pull (:conn app) pattern)
-    (utils/deref-or-value eids)))
-
-
-(def pull-attr
-  "Wraps safe pull, and etracts the results for a given attr"
-  (memoize
-    (fn [conn eid attr-ident]
-      (reaction
-        (get @(safe-pull conn [attr-ident] eid) attr-ident)))))
-
-(def pull-path
-  ;(memoize
-    (fn [conn eid attr-path]
-      ;; Question: Should use cursor?
-      (reaction
-        (get-in
-          @(safe-pull conn (vec (filter keyword? attr-path)) eid)
-          attr-path))))
-
-
-
-;; ## Context
-
-;; We're going to be re-describing things in terms of context.
-;; Context includes configuration and contextual information about where things are.
-;; But it is extensible, so we can pass through whatever information we might like about how to render things.
-
-;; All of these should be checked for their semantics on :dat.view.base-context/value etc; Is this the right way to represent these things?
-
-;; Should probably move all of these out to reactions or some such, except for anything that's considered public
-
-(defonce default-base-context (r/atom {}))
-
-(def base-context
-  ;; Not sure if this memoize will do what I'm hoping it does (:staying-alive true, effectively)
-  (memoize
-    (fn [app]
-      ;; Hmm... should we just serialize the structure fully?
-      ;; Adds complexity around wanting to have namespaced attribute names for everything
-      (reaction
-        (try
-          (:dat.view.base-context/value
-            @(safe-pull (:conn app) '[*] [:db/ident ::base-context]))
-          ;; Easter egg:
-          ;; A self installing config entity :-) Good pattern?
-          (catch :default e
-            (log/warn "You don't yet have a :dat.view/base-context setting defined. Creating one.")
-            (dispatch! app [:dat.reactor/local-tx [{:db/ident ::base-context}]])))))))
-
-(defn update-base-context!
-  [app f & args]
-  (letfn [(txf [db]
-            (apply update
-                   (d/pull db '[*] [:db/ident ::base-context])
-                   :dat.view.base-context/value
-                   f
-                   args))]
-    (d/transact! (:conn app) [[:db.fn/call txf]])))
-
-(defn set-base-context!
-  [app context]
-  (update-base-context! app (constantly context)))
-
-
-
-
-(defn meta-sig
-  [args-vec]
-  (mapv #(vector % (meta %)) args-vec))
-
-(defn meta-memoize
-  ([f]
-   ;; Don't know if this actually has to be an r/atom; may be more performant for it not to be
-   (meta-memoize f (r/atom {})))
-  ([f cache]
-   (fn [& args]
-     (if-let [cached-val (get @cache (meta-sig args))] 
-       cached-val
-       (let [new-val (apply f args)]
-         (swap! cache assoc (meta-sig args) new-val)
-         new-val)))))
-
-;; ### Attribute metadata reactions
-
-(def attribute-schema-reaction
-  "Returns the corresponding attr-ident entry from the Datomic schema. Returns full entity ref-attr; Have to path for idents."
-  (memoize
-    (fn [app attr-ident]
-      (if (= attr-ident :db/id)
-        (reaction {:db/id nil})
-        (safe-pull (:conn app)
-                   '[* {:db/valueType [:db/ident]
-                        :db/cardinality [:db/ident]
-                        :db/unique [:db/ident]
-                        :attribute.ref/types [:db/ident]}]
-                   [:db/ident attr-ident])))))
-
-;; Another function gives us a version of this that maps properly to idents
-(def attribute-signature-reaction
-  "Reaction of the pull of a schema attribute, where any ref-attrs to something with any ident entity
-  have been replaced by that ident keyword."
-  (memoize
-    (fn [app attr-ident]
-      (let [schema-rx (attribute-schema-reaction app attr-ident)]
-        (reaction
-          (into {}
-            (letfn [(mapper [x]
-                      (or (:db/ident x)
-                          (and (sequential? x) (map mapper x))
-                          x))]
-              (map (fn [[k v]] [k (mapper v)])
-                   @schema-rx))))))))
-
-
-;; This is what does all the work of computing our context for each component
-;; XXX Need to think about this a bit more; The way things are going with the context resolution now, this may become more orthogonal
-;(def component-context nil)
-(def component-context
-  "This function returns the component configuration (base-context; should rename) for either an entire render network,
-  abstractly, or for a specific component based on a component id (namespaced keyword matching the function to be called)."
-  ;(memoize
-    (fn component-context*
-      ([app]
-       (reaction
-         ;; Don't need this arity if we drop the distinction between base-context and default-base-context
-         (merge
-           @default-base-context
-           @(base-context app))))
-      ([app representation-id]
-       (component-context* app representation-id {}))
-      ([app representation-id {;; Options, in order of precedence in consequent merging
-                               :keys [dat.view/locals ;; points to local overrides; highest precedence
-                                      ;; When the component is in a scope closed over by some particular attribute:
-                                      db.attr/ident]}] ;; db/ident of the attribute; precedence below
-       (reaction
-         (let [base-context @(component-context app)]
-           (if ident
-             (let [attr-sig @(attribute-signature-reaction app ident)]
-               (merge (get-in base-context [::base-config representation-id])
-                      (get-in base-context [::card-config (:db/cardinality attr-sig) representation-id])
-                      (get-in base-context [::value-type-config (:db/valueType attr-sig) representation-id])
-                      (get-in base-context [::attr-config ident])))
-             ;; Need to also get the value type and card config by the attr-config if that's all that's present; Shouldn't ever
-             ;; really need to pass in manually XXX
-             (merge (get-in base-context [::base-config representation-id])
-                    (utils/deref-or-value locals))))))))
+(def default-base-context context/default-base-context)
+(def base-context context/base-context)
+(def update-base-context! context/update-base-context!)
+(def set-base-context! context/set-base-context!)
+(def attribute-signature-reaction context/attribute-signature-reaction)
+(def attribute-schema-reaction context/attribute-schema-reaction)
+(def component-context context/component-context)
 
 
 
@@ -887,7 +693,6 @@
       ([app attr-ident]
        (ref-attr-options app attr-ident :db/id))
       ([app attr-ident sort-key]
-       (log/debug "Calling ref-attr-options with attr-ident:" attr-ident)
        (->>
          (safe-q '[:find [(pull ?e [:db/id :db/ident * {:e/type [*]}]) ...]
                    :in $ % ?attr
@@ -1023,6 +828,8 @@
     ;; TODO Need to rewrite in terms of representations
     (let [attr @(attribute-signature-reaction app attr-ident)
           pull-expr (::pull-expr context-data)]
+      [:div
+       [represent app [::control-set]]]
       (match [attr context-data]
         ;; The first two forms here have to be compbined and the decision about whether to do a dropdown
         ;; left as a matter of the context (at least for customization); For now leaving though... XXX
@@ -1126,7 +933,7 @@
      :style {:flex-flow "column wrap"}
      :children inputs]]])
 
-;; TODO Need to rewrite in terms of represetnations
+;; TODO Need to rewrite in terms of control represetnations (and make more abstract and ref attr-type based)
 (defn add-reference-button
   "Simple add reference button"
   ([tooltip on-click-fn]
@@ -1185,14 +992,12 @@
                   false)]
       ;; TODO Need to add sorting functionality here...
       (fn [app [_ context-data] [eid attr-ident value]]
-        (log/debug "Rendering fields-for" attr-ident)
         (let [context @(component-context app ::field-for {:dat.view/locals context-data :dat.view/attr attr-ident})
               pull-expr (::pull-expr context)
               conn (:conn app)
               eid (:db/id @(safe-pull conn '[*] eid))
               value (or value (get @(safe-pull conn [attr-ident] eid) attr-ident))]
           ;; Ug... can't get around having to duplicate :field and label-view
-          (log/debug "more stuff for" attr-ident)
           (when (and eid
                      (not (or (:attribute/hidden? context) (= :db/id attr-ident))))
             (let [type-idents (:attribute.ref/types @attr-sig)]
@@ -1350,8 +1155,11 @@
 (defn edit-entity-form
   [app eid]
   (if-let [eid @(pull-attr (:conn app) eid :db/id)]
-    [re-com/v-box :children [;[debug "Pull data:" @(posh/pull (:conn app) '[* {:e/type [*]}] eid)]
-                             [pull-form app eid]]]
+    (let [pull-expr @(entity-pull app eid)]
+      [re-com/v-box :children [;[debug "Pull data:" @(posh/pull (:conn app) '[* {:e/type [*]}] eid)]
+                               [:h3 "Editing " [pull-summary-string app @(posh/pull (:conn app) pull-expr eid)]]
+                               [pull-form app eid]
+                               [pull-view app pull-expr eid]]])
     [loading-notification "Please wait; form data is loading."]))
 
 
@@ -1462,7 +1270,7 @@
             (if-let [type-id @type-id-rx]
               @(type-pull app type-id)
               (do
-                (log/debug "Bad type id for entity-or-eid: " entity-or-eid)
+                (log/warn "Bad type id for entity-or-eid: " entity-or-eid)
                 base-pull)))))))
 
 
@@ -1516,7 +1324,7 @@
 ;; ::delegate-to
 
 
-(swap! default-base-context
+(swap! context/default-base-context
   utils/deep-merge
   ;; Top level just says that this is our configuration? Or is that not necessary?
   {::base-config
@@ -1565,8 +1373,10 @@
    ::card-config {}
    ;; Specifications merged in for any value type
    ::value-type-config {}
-   ::attr-config {:db/id {:dat.view.forms/field-for {:attribute/hidden? true
-                                                     :dom/attrs {:style {:display "none"}}}}}})
+   ::attr-config {:db/id {::field-for {:attribute/hidden? true
+                                       :dom/attrs {:style {:display "none"}}}}
+                  :db/ident {::field-for {:attribute/hidden? true
+                                          :dom/attrs {:style {:dispay "none"}}}}}})
    ;; Will add the ability to add mappings at the entity level; And perhaps specifically at the type level.
    ;; Use the patterns of OO/types with pure data; Dynamic
 

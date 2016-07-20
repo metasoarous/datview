@@ -61,7 +61,10 @@
      :db/cardinality :db.cardinality/many
      :db/doc         "For a reference attribute, what e.types are acceptable?"
      :db.install/_attribute :db.part/db}]
-   [[:db/add :attribute.ref/types :attribute.ref/types :e.type/Type]]
+   ;; Some misc recursive installation
+   [[:db/add :attribute.ref/types :attribute.ref/types :e.type/Type]
+    [:db/add :e/type :attribute.ref/types :e.type/Type]
+    [:db/add :e.type/Type :e/type :e.type/Type]]
    [{:db/id          #db/id[:db.part/db]
      :db/ident       :e.type/attributes
      :db/valueType   :db.type/ref
@@ -77,7 +80,6 @@
      :attribute/label "Ancestral Type"
      :db/doc         "Indicates that one entity type 'is' some special case of another, and should inherit all of it's fields. We can build multimethod hierarchies out of these things."
      :db.install/_attribute :db.part/db}]
-   [[:db/add :e.type/Type :e/type :e.type/Type]]
    [{:db/id     #db/id[:db.part/user]
      :db/ident  :e.type/Entity
      :e/type    :e.type/Type

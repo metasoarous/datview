@@ -2,7 +2,8 @@
   (:require
     #?(:cljs [reagent.core :as r])
     #?(:cljs [reagent.ratom :refer-macros [reaction]])
-    [taoensso.timbre :as log]))
+    [taoensso.timbre :as log]
+    [dat.view.styles :as styles]))
 
 
 (defn cljc-atom [init-value]
@@ -27,7 +28,6 @@
               (fn [app representation data]
                 [represent* app representation data])})
      :clj [represent* app representation data]))
-
 
 ;; TODO Replace evil global mutable state with local values!
 (defonce registrations
@@ -70,6 +70,23 @@
                 [:p "Data:"]
                 [:pre (pr-str data)]])]))))))
 
+
+(defn representation-override
+  [representation-fn]
+  (fn [app [representation-id context-data] data]
+    (if-let [representation-id (:dat.view/representation-id context-data)]
+      [represent app [representation-id (dissoc :dat.view/representation-id context-data)] data]
+      [representation-fn app [representation-id context-data] data])))
+
+
+(defn with-controls
+  [representation-fn]
+  (fn [app [representation-id context-data] data]
+    (if-let [controls (:dat.view/controls context-data)]
+      [:div (styles/h-box-styles)
+       [represent app [:dat.view/control-set context-data] data]
+       [representation-fn app [representation-id (dissoc context-data :dat.view/controls)] data]])))
+
 ;(def resolve-context* nil)
 (defmulti resolve-context*
   (fn [app from-representation to-representation-id]
@@ -101,9 +118,11 @@
 
 (defn register-representation
   ([representation-id middleware representation-fn]
-   (let [base-middleware [(partial reactively-register representation-id)
+   (let [base-middleware [;with-controls
+                          ;representation-override
+                          ;(partial resolve-context-ware representation-id)
+                          (partial reactively-register representation-id)
                           (partial handle-errors representation-id)]
-                          ;(partial resolve-context-ware representation-id)]
          middleware (concat middleware base-middleware)
          middleware-fn (apply comp middleware)
          representation-fn' (middleware-fn representation-fn)]

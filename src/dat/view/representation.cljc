@@ -98,9 +98,10 @@
   (second representation))
 
 #?(:cljs
-    (defn resolve-context [app [representation-id context-data]]
-      (let [context-data @(context/component-context app representation-id context-data)]
-        (resolve-context* app [representation-id context-data]))))
+    (defn resolve-context [app [representation-id local-context]]
+      ;(log/debug "Resolving context for: " [representation-id local-context])
+      (let [context @(context/component-context app representation-id local-context)]
+        (resolve-context* app [representation-id context]))))
 
 
 (defn register-context-resolution
@@ -124,14 +125,25 @@
     ;; TODO For now...
     (def resolve-context-ware identity))
 
+(defn apply-form2-middleware
+  [middleware representation-fn]
+  (fn [app representation data]
+    (let [return-val (representation-fn app representation data)]
+      (if (fn? return-val)
+        ;; Then form2 component
+        ((apply comp middleware) return-val)
+        ;; then hiccup; return directly
+        return-val))))
 
 (defn register-representation
   ([representation-id middleware representation-fn]
-   (let [base-middleware [;with-controls
-                          resolve-context-ware
+   (let [base-middleware [resolve-context-ware
                           (partial reactively-register representation-id)
                           (partial handle-errors representation-id)]
-         middleware (concat middleware base-middleware)
+         outer-middleware (concat middleware base-middleware)
+         middleware (concat middleware
+                            [(partial apply-form2-middleware outer-middleware)]
+                            base-middleware)
          middleware-fn (apply comp middleware)
          representation-fn' (middleware-fn representation-fn)]
      (swap! registrations assoc representation-id representation-fn')

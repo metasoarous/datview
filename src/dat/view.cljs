@@ -530,12 +530,6 @@
               pull-expr (::pull-expr context)
               pull-data (utils/deref-or-value pull-data)]
           [:div {:style h-box-styles}
-           ;[debug "Context:" local-context]
-           [frisk/FriskInline context]
-          ;[:div {:style (merge h-box-styles
-          ;                     bordered-box-style)}
-           ;"Context"
-           ;[:div {:style {:max-height "300px" :overflow-y "scroll"}} [debug (keys context)]]
            (when collapsable?
              [collapse-button collapse-attribute?])
            (when @collapse-attribute?
@@ -570,9 +564,10 @@
           child-context (-> (:dat.view.context/locals context)
                             ;; !!! Extract and merge the metadata context from the pull expression
                             (merge (meta-context pull-expr))
-                            (assoc ::pull-expr pull-data))]
+                            (assoc ::pull-expr pull-expr))]
       ;; TODO We are also associng in the pull expr above somewhere; Should make these play nice together and decide on precedence
-      [represent app [::pull-data-view child-context] pull-data])))
+      [:div
+       [represent app [::pull-data-view child-context] pull-data]])))
 
 
 (defn pull-data-view

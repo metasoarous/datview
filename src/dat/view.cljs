@@ -828,47 +828,49 @@
           local-context (:dat.view.context/locals context)]
       ;[:div
       ; [represent app [::control-set]]]
-      (match [attr]
-        ;; The first two forms here have to be compbined and the decision about whether to do a dropdown
-        ;; left as a matter of the context (at least for customization); For now leaving though... XXX
-        ;; We have an isComponent ref; do nested form
-        ;; Should this clause just be polymorphic on whether value is a map or not?
-        [{:db/valueType :db.type/ref :db/isComponent true}]
-        ;; Need to assoc in the root node context here
-        (let [sub-expr (some #(get % attr-ident) pull-expr) ;; XXX This may not handle a ref not in {}
-              ;; Need to handle situation of a recur point ('...) as a specification; Should be the context pull root, or the passed in expr, if needed
-              sub-expr (if (= sub-expr '...) (or (:dat.view/root-pull-expr context) pull-expr) sub-expr)
-              local-context (if (:dat.view/root-pull-expr context)
-                              context
-                              (assoc context :dat.view/root-pull-expr pull-expr))]
-          ;(when-not (= (:db/cardinality attr) :db.cardinality/many)
-          ;;(nil? value))
-          [pull-form app local-context sub-expr value])
-        ;; This is where we can insert something that catches certain things and handles them separately, depending on context
-        ;[{:db/valueType :db.type/ref} {:dat.view.level/attr {?}}]
-        ;[pull-form app context-data (get pull-expr value)]
-        ;; TODO Need to redo all the below as representations
-        ;; Non component entity; Do dropdown select...
-        [{:db/valueType :db.type/ref}]
-        [select-entity-input app eid attr-ident value]
-        ;; Need separate handling of datetimes
-        [{:db/valueType :db.type/instant}]
-        [datetime-selector app eid attr-ident value]
-        ;; Booleans should be check boxes
-        [{:db/valueType :db.type/boolean}]
-        [boolean-selector app eid attr-ident value]
-        ;; For numeric inputs, want to style a little differently
-        [{:db/valueType (:or :db.type/float :db.type/double :db.type/integer :db.type/long)}]
-        [re-com/input-text
-         :model (str value)
-         :width "130px"
-         :on-change (make-change-handler app eid attr-ident value)]
-        ;; Misc; Simple input, but maybe do a dynamic type dispatch as well for customization...
-        :else
-        [re-com/input-text
-         :model (str value) ;; just to make sure...
-         :width (if (= attr-ident :db/doc) "350px" "200px")
-         :on-change (make-change-handler app eid attr-ident value)]))))
+      [:div (merge {:styles (merge h-box-styles)}
+                   (:dom/attrs context))
+       (match [attr]
+         ;; The first two forms here have to be compbined and the decision about whether to do a dropdown
+         ;; left as a matter of the context (at least for customization); For now leaving though... XXX
+         ;; We have an isComponent ref; do nested form
+         ;; Should this clause just be polymorphic on whether value is a map or not?
+         [{:db/valueType :db.type/ref :db/isComponent true}]
+         ;; Need to assoc in the root node context here
+         (let [sub-expr (some #(get % attr-ident) pull-expr) ;; XXX This may not handle a ref not in {}
+               ;; Need to handle situation of a recur point ('...) as a specification; Should be the context pull root, or the passed in expr, if needed
+               sub-expr (if (= sub-expr '...) (or (:dat.view/root-pull-expr context) pull-expr) sub-expr)
+               local-context (if (:dat.view/root-pull-expr context)
+                               context
+                               (assoc context :dat.view/root-pull-expr pull-expr))]
+           ;(when-not (= (:db/cardinality attr) :db.cardinality/many)
+           ;;(nil? value))
+           [pull-form app local-context sub-expr value])
+         ;; This is where we can insert something that catches certain things and handles them separately, depending on context
+         ;[{:db/valueType :db.type/ref} {:dat.view.level/attr {?}}]
+         ;[pull-form app context-data (get pull-expr value)]
+         ;; TODO Need to redo all the below as representations
+         ;; Non component entity; Do dropdown select...
+         [{:db/valueType :db.type/ref}]
+         [select-entity-input app eid attr-ident value]
+         ;; Need separate handling of datetimes
+         [{:db/valueType :db.type/instant}]
+         [datetime-selector app eid attr-ident value]
+         ;; Booleans should be check boxes
+         [{:db/valueType :db.type/boolean}]
+         [boolean-selector app eid attr-ident value]
+         ;; For numeric inputs, want to style a little differently
+         [{:db/valueType (:or :db.type/float :db.type/double :db.type/integer :db.type/long)}]
+         [re-com/input-text
+          :model (str value)
+          :width "130px"
+          :on-change (make-change-handler app eid attr-ident value)]
+         ;; Misc; Simple input, but maybe do a dynamic type dispatch as well for customization...
+         :else
+         [re-com/input-text
+          :model (str value) ;; just to make sure...
+          :width (if (= attr-ident :db/doc) "350px" "200px")
+          :on-change (make-change-handler app eid attr-ident value)])])))
 
 
 (defn create-type-reference
@@ -1001,6 +1003,7 @@
                      (not (or (:attribute/hidden? context) (= :db/id attr-ident))))
             (let [type-idents (:attribute.ref/types @attr-sig)]
               ;; Are controls still separated this way? Should they be?
+              ;[:div {:style h-box-styles}
               [:div (:dom/attrs context)
                [field-for-skeleton app attr-ident
                 ;; Right now these can't "move" because they don't have keys XXX Should fix with another component
@@ -1159,6 +1162,7 @@
       [re-com/v-box :children [;[debug "Pull data:" @(posh/pull (:conn app) '[* {:e/type [*]}] eid)]
                                [:h3 "Editing " [pull-summary-string app @(posh/pull (:conn app) pull-expr eid)]]
                                [pull-form app eid]
+                               [:h4 "Preview:"]
                                [pull-view app pull-expr eid]]])
     [loading-notification "Please wait; form data is loading."]))
 
@@ -1369,16 +1373,16 @@
                                 :font-size "18px"
                                 :font-weight "bold"})}}
      ;::component pull-summary-view}
-    ::field-for
+    ::fields-for
     {:dom/attrs {:style v-box-styles}}}
    ;; Specifications merged in for any config with a certain cardinality
    ::card-config {}
    ;; Specifications merged in for any value type
    ::value-type-config {}
-   ::attr-config {:db/id {::field-for {:attribute/hidden? true
-                                       :dom/attrs {:style {:display "none"}}}}
-                  :db/ident {::field-for {:attribute/hidden? true
-                                          :dom/attrs {:style {:dispay "none"}}}}}})
+   ::attr-config {:db/id {::fields-for {:attribute/hidden? true
+                                        :dom/attrs {:style {:display "none"}}}}
+                  :db/ident {::fields-for {:attribute/hidden? true
+                                           :dom/attrs {:style {:display "none"}}}}}})
    ;; Will add the ability to add mappings at the entity level; And perhaps specifically at the type level.
    ;; Use the patterns of OO/types with pure data; Dynamic
 

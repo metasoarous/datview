@@ -80,14 +80,6 @@
       [representation-fn app [representation-id context-data] data])))
 
 
-(defn with-controls
-  [representation-fn]
-  (fn [app [representation-id context-data] data]
-    (if-let [controls (:dat.view/controls context-data)]
-      [:div (styles/h-box-styles)
-       [represent app [:dat.view/control-set context-data] data]
-       [representation-fn app [representation-id (dissoc context-data :dat.view/controls)] data]])))
-
 ;(def resolve-context* nil)
 (defmulti resolve-context*
   (fn [app representation]

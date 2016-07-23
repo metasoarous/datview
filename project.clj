@@ -15,7 +15,7 @@
                  [com.andrewmcveigh/cljs-time "0.4.0"]
                  [testdouble/clojurescript.csv "0.2.0"]
                  [datascript "0.15.0"]
-                 [posh "0.5.3.1"]
+                 [posh "0.5.3.3"]
                  [reagent "0.5.1"]
                  ;; Not sure if this should just be a dev dep; It's kinda nice
                  [data-frisk-reagent "0.2.3"]

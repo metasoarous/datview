@@ -567,6 +567,7 @@
                             (assoc ::pull-expr pull-expr))]
       ;; TODO We are also associng in the pull expr above somewhere; Should make these play nice together and decide on precedence
       [:div
+       [frisk/FriskInline (posh/pull-info (:conn app) pull-expr eid)]
        [represent app [::pull-data-view child-context] pull-data]])))
 
 
@@ -826,10 +827,9 @@
     (let [attr @(attribute-signature-reaction app attr-ident)
           pull-expr (::pull-expr context)
           local-context (:dat.view.context/locals context)]
-      ;[:div
-      ; [represent app [::control-set]]]
-      [:div (merge {:styles (merge h-box-styles)}
-                   (:dom/attrs context))
+      [:div
+       ;[frisk/FriskInline context]
+       [represent app [::control-set context] [eid attr-ident value]]
        (match [attr]
          ;; The first two forms here have to be compbined and the decision about whether to do a dropdown
          ;; left as a matter of the context (at least for customization); For now leaving though... XXX
@@ -971,10 +971,25 @@
    (add-reference-button "Add entity" modal-popup)))
 
 
+(representation/register-representation
+  ::add-reference-control
+  (fn [app [_ context] data]))
+
+
+(defn with-controls
+  [representation-fn]
+  (fn [app [representation-id context-data] data]
+    (if-let [controls (:dat.view/controls context-data)]
+      [:div {:style h-box-styles}
+       [represent app [:dat.view/control-set context-data] data]
+       [representation-fn app [representation-id (dissoc context-data :dat.view/controls)] data]])))
+
+
 ;; Again; need to think about the right way to pass through the attribute data here
 ;
 (representation/register-representation
   ::fields-for
+  ;[with-controls]
   ;; So first we get attr-signature and config
   ;; TODO Should make this also ok with not passing in the value(s) so that it can pull for you...
   (fn [app [_ context] [eid attr-ident value]]
@@ -1000,7 +1015,7 @@
               local-context (:dat.view.context/locals context)]
           ;; Ug... can't get around having to duplicate :field and label-view
           (when (and eid
-                     (not (or (:attribute/hidden? context) (= :db/id attr-ident))))
+                     (not (or (:attribute/hidden? context) (#{:db/id :db/ident} attr-ident))))
             (let [type-idents (:attribute.ref/types @attr-sig)]
               ;; Are controls still separated this way? Should they be?
               ;[:div {:style h-box-styles}
@@ -1432,12 +1447,11 @@
       (let [base-schema (utils/deep-merge {:db/ident {:db/ident :db/ident :db/unique :db.unique/identity}}
                                           (:datascript/schema config))
             ;; Should try switching to r/atom
-            ;conn (or conn (::conn config) (r/atom (d/empty-db base-schema)))
             conn (or conn (::conn config) (d/create-conn base-schema))
             routes (or routes (::routes config) routes/routes) ;; base routes
             main (or main (::main config))
             history (router/make-history)
-            component (assoc component :conn conn :main main :history history :routes routes)]
+            component (assoc component :conn conn :base-conn conn :main main :history history :routes routes)]
         ;; Transact default settings to db
         (d/transact! conn default-settings)
         ;; Start posh

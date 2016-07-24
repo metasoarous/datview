@@ -554,6 +554,7 @@
 
 ;; See definition below
 (declare meta-context)
+(declare entity-pull)
 
 ;; Note that here we extract the meta-context from the pull-expr
 
@@ -584,7 +585,10 @@
   ([app context pull-expr eid]
    [represent app [::pull-view context] [pull-expr eid]])
   ([app pull-expr eid]
-   (pull-view app (meta-context pull-expr) pull-expr eid)))
+   (let [pull-expr (deref-or-value pull-expr)]
+     [pull-view app (meta-context pull-expr) pull-expr eid]))
+  ([app eid]
+   [pull-view app @(entity-pull app eid) eid]))
 
 ;; General purpose sortable collections in datomic/ds?
 ;; Should use :attribute/sort-by; default :db/id?
@@ -1444,7 +1448,8 @@
     (try
       (log/info "Starting Datview")
       ;; TODO Ugg... need to have a way for Datsync to register its default schema
-      (let [base-schema (utils/deep-merge {:db/ident {:db/ident :db/ident :db/unique :db.unique/identity}}
+      (let [base-schema (utils/deep-merge {:db/ident {:db/ident :db/ident :db/unique :db.unique/identity}
+                                           :dat.sync.remote.db/id {:db/unique :db.unique/identity}}
                                           (:datascript/schema config))
             ;; Should try switching to r/atom
             conn (or conn (::conn config) (d/create-conn base-schema))

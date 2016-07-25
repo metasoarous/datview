@@ -262,24 +262,21 @@
 ;; These are builder pieces part of the public api;
 ;; These should be accessible for wrapping, and should be overridable/extensible via correspondingly named keys of the context map at various entry points
 
+(defn ^:dynamic pull-summary-string
+  [pull-data]
+  (match [pull-data]
+    [{:e/name name}] name
+    [{:attribute/label label}] label
+    [{:db/ident ident}] (name ident)
+    [{:e/type {:db/ident type-ident}}] (str (name type-ident) " instance")
+    ;; A terrible assumption really, but fine enough for now
+    :else (pr-str pull-data)))
+
 
 (representation/register-representation
   ::pull-summary-string
   (fn [_ _ pull-data]
-    ;[:span
-     (match [pull-data]
-       [{:e/name name}] name
-       [{:attribute/label label}] label
-       [{:db/ident ident}] (name ident)
-       [{:e/type {:db/ident type-ident}}] (str (name type-ident) " instance")
-       ;; A terrible assumption really, but fine enough for now
-       :else (pr-str pull-data))))
-
-(defn pull-summary-string
-  ([app pull-data]
-   (pull-summary-string app {} pull-data))
-  ([app context pull-data]
-   [represent app [::pull-summary-string context] pull-data]))
+    [:span (pull-summary-string pull-data)]))
 
 
 (representation/register-representation
@@ -688,7 +685,7 @@
   stuff)
 
 (def ref-attr-options
-  (memoize
+  ;(memoize
     (fn
       ([app attr-ident]
        (ref-attr-options app attr-ident :db/id))
@@ -700,19 +697,11 @@
                           (type-instance ?type ?e)]
                  (:conn app)
                  query/rules
-                 [:db/ident attr-ident]))))))
-         ;deref
-         ;(mapv
-         ;  (fn [pull-data]
-         ;    (assoc pull-data
-         ;      ;; XXX pull-summary-string does not actually return a string... need to fix this
-         ;      :label (or (pull-summary-string app pull-data) "NA")
-         ;      :id (:db/id pull-data))))
-         ;; XXX There needs to be more control over the ordering here, via context or something; Explicitly passing options is a punt
-         ;inspect
-         ;(sort-by :db/id)
-         ;vec
-         ;reaction)))))
+                 [:db/ident attr-ident])
+         deref
+         (sort-by :db/id)
+         vec
+         reaction))))
 
 ;; TODO Need constext here for a better sort-by specification; switch to representation
 (defn select-entity-input
@@ -729,12 +718,13 @@
                    value)]
      [re-com/single-dropdown
       :style {:min-width "150px"}
+      :filter-box? true
       :choices options
       ;; TODO Not sure if this will break things or not; have to test
       ;:model (:db/id value)
       :id-fn :db/id
       ;; For now hard coding this... For some reason using the summary function here is messing everything up
-      :label-fn :e/name
+      :label-fn pull-summary-string
       :model value
       :on-change (partial apply-reference-change! app eid attr-ident value)])))
 
@@ -1195,7 +1185,7 @@
   (if-let [eid @(pull-attr (:conn app) eid :db/id)]
     (let [pull-expr @(entity-pull app eid)]
       [re-com/v-box :children [;[debug "Pull data:" @(posh/pull (:conn app) '[* {:e/type [*]}] eid)]
-                               [:h3 "Editing " [pull-summary-string app @(posh/pull (:conn app) pull-expr eid)]]
+                               [:h3 "Editing " (pull-summary-string @(posh/pull (:conn app) pull-expr eid))]
                                [pull-form app eid]
                                [:h4 "Preview:"]
                                [pull-view app pull-expr eid]]])

@@ -41,7 +41,7 @@
 
 (defn update-setting
   [app setting new-value]
-  (dispatcher/dispatch! app [::update [setting new-value]]))
+  (dispatcher/dispatch! (:dispatcher app) [::update [setting new-value]]))
 
 ;; ohh... should have update-settings for bulk single transaction update as well...
 

@@ -17,6 +17,7 @@
                  [datascript "0.15.0"]
                  [posh "0.5.3.1"]
                  [reagent "0.5.1"]
+                 [markdown-clj "0.9.89"]
                  ;; Not sure if this should just be a dev dep; It's kinda nice
                  [data-frisk-reagent "0.2.3"]
                  [re-com "0.8.3"]
@@ -38,7 +39,7 @@
                                    :optimizations :advanced
                                    :pretty-print  false
                                    :elide-asserts true
-                                   :output-wrapper false 
+                                   :output-wrapper false
                                    :parallel-build true}}]}
                         ;:notify-command ["release-js/wrap_bare.sh"]
   :profiles {:dev {:source-paths ["bench/src" "test" "dev" "src"]
@@ -68,7 +69,7 @@
   ;; ## Back to from extraction...
   ;; =============================
   ;;
-  ;; Once we're ready 
+  ;; Once we're ready
   ;:core.typed {:check []
                ;:check-cljs []}
   ;;

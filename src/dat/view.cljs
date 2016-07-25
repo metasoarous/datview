@@ -743,49 +743,60 @@
 
 ;; ### Datetimes...
 
-;; TODO Need to get proper date+time handlers that handle both the date and the time
+(defn datetime-with-time-int [datetime time-int]
+  (let [dt (cljs-time/to-default-time-zone datetime)
+        dt-with-time (cljs-time/local-date-time (cljs-time/year dt) (cljs-time/month dt) (cljs-time/day dt)
+                                 (input-time/time->hrs time-int) (input-time/time->mins time-int)
+                                 (cljs-time/second dt) (cljs-time/milli dt)
+                                 ;; FIXME: 2400 + second & milli does not exist
+                                 )
+        dt-utc (cljs-time.coerce/to-date-time dt-with-time)]
+    dt-utc))
 
-;(defn update-date
-;  [old-instant new-date]
-;  ;;; For now...
-;  (let [old-instant (cljs-time.coerce/from-date old-instant)
-;        day-time (cljs-time/minus old-instant (cljs-time/at-midnight old-instant))
-;        new-time (cljs-time/plus new-date day-time)]
-;    new-time))
+(defn datetime-with-date [dt date]
+  (log/info "date-val" date)
+  (cljs-time/date-time (cljs-time/year date) (cljs-time/month date) (cljs-time/day date) (cljs-time/hour dt) (cljs-time/minute dt) (cljs-time/second dt) (cljs-time/milli dt)))
 
-(defn update-date
-  [old-instant new-date]
-  ;; For now...
-  new-date)
-
-(defn datetime-date-change-handler
-  [app eid attr-ident current-value new-date-value]
+(defn datetime-change-handler
+  [app datetime-mask-fn eid attr-ident current-value new-partial-value]
   (let [old-value @current-value
-        new-value (update-date old-value new-date-value)]
+        new-value (datetime-mask-fn old-value new-partial-value)]
     (reset! current-value new-value)
     (send-tx! app
               (concat (when old-value
                         [[:db/retract eid attr-ident (cljs-time.coerce/to-date old-value)]])
                       [[:db/add eid attr-ident (cljs-time.coerce/to-date new-value)]]))))
 
-;; XXX Finish
-(defn datetime-time-change-handler
+(defn datetime-date-change-handler
+  [app eid attr-ident current-value new-date-value]
+  (datetime-change-handler app datetime-with-date eid attr-ident current-value new-date-value))
+
+(defn datetime-time-int-change-handler
   [app eid attr-ident current-value new-time-value]
-  ())
+  (datetime-change-handler app datetime-with-time-int eid attr-ident current-value new-time-value))
 
-(defn timeint-from-datetime
-  [datetime])
+(defn datetime->time-int [datetime]
+  (let [dt (cljs-time/to-default-time-zone datetime)]
+    (+ (* 100 (cljs-time/hour dt))
+      (cljs-time/minute dt))))
 
-
-(defn datetime-selector
-  [app eid attr-ident value]
-  (let [current-value (atom value)]
-    (fn [app eid attr-ident value]
-      [:datetime-selector
-       [re-com/datepicker-dropdown :model (cljs-time.coerce/from-date (or @current-value (cljs-time/now)))
-        :on-change (partial datetime-date-change-handler app eid attr-ident current-value)]])))
-;[re-com/input-time :model (timeint-from-datetime @current-value)
-;:on-change (partial datetime-time-change-handler app eid attr-ident current-value)]
+(representation/register-representation
+  ::datetime-selector
+  (fn [app [_ context] [eid attr-ident value]]
+    (let [current-utc-datetime (r/atom (or (cljs-time.coerce/from-date value) (cljs-time/now)))
+          ;;current-time-int (ratom/make-reaction (fn [] ))
+          ]
+      (fn [app [_ context] [eid attr-ident value]]
+;;           (log/info "current-time-int" @current-time-int)
+          [re-com/h-box
+           :children
+           [
+             [re-com/datepicker-dropdown :model @current-utc-datetime
+             :on-change (partial datetime-date-change-handler app eid attr-ident current-utc-datetime)]
+            [re-com/input-time :model (datetime->time-int @current-utc-datetime)
+             :on-change (partial datetime-time-int-change-handler app eid attr-ident current-utc-datetime)]
+            ]]
+          ))))
 
 
 (defn boolean-selector
@@ -1409,7 +1420,7 @@
 
 ;; Should make this derefable
 
-(defrecord Datview 
+(defrecord Datview
   ;;  The public API: these two attributes
   [conn   ;; You can access this for your posh queries; based on reactor unless otherwise specified
    config ;; How you control the instantiation of Datview; options:

@@ -19,7 +19,7 @@
                  [reagent "0.5.1"]
                  [markdown-clj "0.9.89"]
                  ;; Not sure if this should just be a dev dep; It's kinda nice
-                 [data-frisk-reagent "0.2.3"]
+                 [data-frisk-reagent "0.2.4"]
                  [re-com "0.8.3"]
                  [bidi "2.0.9"]
                  [io.rkn/conformity "0.4.0"] ;; should this be here?

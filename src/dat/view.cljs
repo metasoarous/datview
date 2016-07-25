@@ -12,13 +12,13 @@
             [dat.view.routes :as routes]
             [dat.view.settings :as settings]
             [dat.spec.protocols :as protocols]
-            ;; Things outside datsys, but intimately tied to datsys
+    ;; Things outside datsys, but intimately tied to datsys
             [datascript.core :as d]
             [posh.reagent :as posh]
             [reagent.core :as r]
             [reagent.ratom :as ratom]
             [re-com.core :as re-com]
-            ;; Other stuff
+    ;; Other stuff
             [datafrisk.core :as frisk]
             [taoensso.timbre :as log :include-macros true]
             [com.stuartsierra.component :as component]
@@ -32,7 +32,8 @@
             [cljs.pprint :as pp]
             [cljs.core.match :as match :refer-macros [match]]
             [markdown.core :as md]
-            [dat.view.styles :as styles]))
+            [dat.view.styles :as styles]
+            [re-com.input-time :as input-time]))
 
 
 
@@ -750,11 +751,15 @@
 
 (defn datetime-with-time-int [datetime time-int]
   (let [dt (cljs-time/to-default-time-zone datetime)
-        dt-with-time (cljs-time/local-date-time (cljs-time/year dt) (cljs-time/month dt) (cljs-time/day dt)
-                                 (input-time/time->hrs time-int) (input-time/time->mins time-int)
-                                 (cljs-time/second dt) (cljs-time/milli dt)
+        dt-with-time (cljs-time/local-date-time
+                       (cljs-time/year dt)
+                       (cljs-time/month dt)
+                       (cljs-time/day dt)
+                       (input-time/time->hrs time-int)
+                       (input-time/time->mins time-int)
+                       (cljs-time/second dt)
+                       (cljs-time/milli dt))
                                  ;; FIXME: 2400 + second & milli does not exist
-                                 )
         dt-utc (cljs-time.coerce/to-date-time dt-with-time)]
     dt-utc))
 
@@ -788,20 +793,20 @@
 (representation/register-representation
   ::datetime-selector
   (fn [app [_ context] [eid attr-ident value]]
-    (let [current-utc-datetime (r/atom (or (cljs-time.coerce/from-date value) (cljs-time/now)))
+    (let [current-utc-datetime (r/atom (or (cljs-time.coerce/from-date value) (cljs-time/now)))]
           ;;current-time-int (ratom/make-reaction (fn [] ))
-          ]
       (fn [app [_ context] [eid attr-ident value]]
-;;           (log/info "current-time-int" @current-time-int)
           [re-com/h-box
            :children
-           [
-             [re-com/datepicker-dropdown :model @current-utc-datetime
+           [[re-com/datepicker-dropdown :model @current-utc-datetime
              :on-change (partial datetime-date-change-handler app eid attr-ident current-utc-datetime)]
             [re-com/input-time :model (datetime->time-int @current-utc-datetime)
-             :on-change (partial datetime-time-int-change-handler app eid attr-ident current-utc-datetime)]
-            ]]
-          ))))
+             :on-change (partial datetime-time-int-change-handler app eid attr-ident current-utc-datetime)]]]))))
+
+(defn datetime-selector
+  [app eid attr-ident value]
+  [represent app [::datetime-selector {}] [eid attr-ident value]])
+
 
 
 (defn boolean-selector

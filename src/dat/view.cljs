@@ -266,14 +266,14 @@
 (representation/register-representation
   ::pull-summary-string
   (fn [_ _ pull-data]
-    ;[:span
+    [:span
      (match [pull-data]
        [{:e/name name}] name
        [{:attribute/label label}] label
        [{:db/ident ident}] (name ident)
        [{:e/type {:db/ident type-ident}}] (str (name type-ident) " instance")
        ;; A terrible assumption really, but fine enough for now
-       :else (pr-str pull-data))))
+       :else (pr-str pull-data))]))
 
 (defn pull-summary-string
   ([app pull-data]
@@ -286,7 +286,7 @@
   ::pull-summary-view
   (fn [app [_ context] pull-data]
     [:div {:style {:font-weight "bold" :padding "5px" :align-self "end"}}
-     [represent app [::pull-summary-string (:dat.view.context/locals context) pull-data]]]))
+     [represent app [::pull-summary-string (:dat.view.context/locals context)] pull-data]]))
 
 (defn pull-summary-view
   [app context pull-data]
@@ -569,7 +569,7 @@
                             (assoc ::pull-expr pull-expr))]
       ;; TODO We are also associng in the pull expr above somewhere; Should make these play nice together and decide on precedence
       [:div
-       [frisk/FriskInline (posh/pull-info (:conn app) pull-expr eid)]
+       ;;[frisk/FriskInline (posh/pull-info (:conn app) pull-expr eid)]
        [represent app [::pull-data-view child-context] pull-data]])))
 
 
@@ -755,8 +755,8 @@
                        (cljs-time/year dt)
                        (cljs-time/month dt)
                        (cljs-time/day dt)
-                       (input-time/time->hrs time-int)
-                       (input-time/time->mins time-int)
+                       (re-com.input-time/time->hrs time-int)
+                       (re-com.input-time/time->mins time-int)
                        (cljs-time/second dt)
                        (cljs-time/milli dt))
                                  ;; FIXME: 2400 + second & milli does not exist
@@ -805,7 +805,8 @@
 
 (defn datetime-selector
   [app eid attr-ident value]
-  [represent app [::datetime-selector {}] [eid attr-ident value]])
+  [represent app [::datetime-selector {}] [eid attr-ident value]]
+  )
 
 
 

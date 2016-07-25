@@ -12,11 +12,12 @@
                  [datreactor "0.0.1-alpha1-SNAPSHOT"]
                  ;; Other stuff
                  [com.stuartsierra/component "0.3.1"]
-                 [com.andrewmcveigh/cljs-time "0.4.0"]
+                 [com.andrewmcveigh/cljs-time "0.5.0-alpha1"]
                  [testdouble/clojurescript.csv "0.2.0"]
                  [datascript "0.15.0"]
                  [posh "0.5.3.3"]
                  [reagent "0.5.1"]
+                 [markdown-clj "0.9.89"]
                  ;; Not sure if this should just be a dev dep; It's kinda nice
                  [data-frisk-reagent "0.2.3"]
                  [re-com "0.8.3"]
@@ -38,7 +39,7 @@
                                    :optimizations :advanced
                                    :pretty-print  false
                                    :elide-asserts true
-                                   :output-wrapper false 
+                                   :output-wrapper false
                                    :parallel-build true}}]}
                         ;:notify-command ["release-js/wrap_bare.sh"]
   :profiles {:dev {:source-paths ["bench/src" "test" "dev" "src"]
@@ -68,7 +69,7 @@
   ;; ## Back to from extraction...
   ;; =============================
   ;;
-  ;; Once we're ready 
+  ;; Once we're ready
   ;:core.typed {:check []
                ;:check-cljs []}
   ;;

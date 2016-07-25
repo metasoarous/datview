@@ -12,7 +12,7 @@
                  [datreactor "0.0.1-alpha1-SNAPSHOT"]
                  ;; Other stuff
                  [com.stuartsierra/component "0.3.1"]
-                 [com.andrewmcveigh/cljs-time "0.4.0"]
+                 [com.andrewmcveigh/cljs-time "0.5.0-alpha1"]
                  [testdouble/clojurescript.csv "0.2.0"]
                  [datascript "0.15.0"]
                  [posh "0.5.3.3"]

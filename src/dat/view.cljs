@@ -1288,17 +1288,12 @@
                                     {:ref true})}
                                  {(:db/ident attr)
                                   ;; TODO Handle these
-                                  (do
-                                    (when (#{:run/overcoats} (:db/ident attr))
-                                      (log/debug "Some jazz happened;"
-                                        (-> (::pull-summary-attrs context))))
-                                            ;(get (:db/ident attr)))))
-                                    (-> (::pull-summary-attrs context)
-                                        (get (:db/ident attr))
-                                        (concat [:e/name :e/description :db/ident {:e/type [:db/id :db/ident]}])
-                                        vec
-                                        (with-meta {;::representation ::pull-summary-view
-                                                    ::collapsed? true ::collapsable? true})))})
+                                  (-> (::pull-summary-attrs context)
+                                      (get (:db/ident attr))
+                                      (concat [:e/name :e/description :db/ident {:e/type [:db/id :db/ident]}])
+                                      vec
+                                      (with-meta {;::representation ::pull-summary-view
+                                                  ::collapsed? true ::collapsable? true}))})
                                (:db/ident attr))))
                       ;; Oh... shouldn't need this. This was probably because of the component refs?
                       (remove nil?)

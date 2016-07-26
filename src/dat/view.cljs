@@ -546,8 +546,9 @@
               ;; XXX TODO Questions:
               ;; Need a react-id function that lets us repeat attrs when needed
               (for [attr-ident (pull-attributes pull-expr pull-data)]
-                ^{:key (hash attr-ident)}
-                [represent app [::attr-view (assoc local-context :db.attr/ident attr-ident)] (get pull-data attr-ident)])])])))))
+                (when-let [values (get pull-data attr-ident)]
+                  ^{:key (hash attr-ident)}
+                  [represent app [::attr-view (assoc local-context :db.attr/ident attr-ident)] values]))])])))))
 
 
 ;; See definition below
@@ -559,7 +560,9 @@
 (representation/register-representation
   ::pull-view
   (fn [app [_ context] [pull-expr eid]]
-    (let [pull-data (safe-pull (:conn app) pull-expr eid)
+    ;; QUESTION Should this pull-expr computation be a function for reuse?
+    (let [pull-expr (or pull-expr (::pull-expr context) @(entity-pull app eid) base-pull)
+          pull-data (safe-pull (:conn app) pull-expr eid)
           child-context (-> (:dat.view.context/locals context)
                             ;; !!! Extract and merge the metadata context from the pull expression
                             (merge (meta-context pull-expr))
@@ -580,13 +583,13 @@
    (pull-data-view app {} pull-data)))
 
 (defn pull-view
-  ([app context pull-expr eid]
-   [represent app [::pull-view context] [pull-expr eid]])
+  ([app eid]
+   [pull-view app @(entity-pull app eid) eid])
   ([app pull-expr eid]
    (let [pull-expr (deref-or-value pull-expr)]
      [pull-view app (meta-context pull-expr) pull-expr eid]))
-  ([app eid]
-   [pull-view app @(entity-pull app eid) eid]))
+  ([app context pull-expr eid]
+   [represent app [::pull-view context] [pull-expr eid]]))
 
 ;; General purpose sortable collections in datomic/ds?
 ;; Should use :attribute/sort-by; default :db/id?
@@ -699,7 +702,7 @@
                  query/rules
                  [:db/ident attr-ident])
          deref
-         (sort-by :db/id)
+         (sort-by sort-key)
          vec
          reaction))))
 
@@ -1144,8 +1147,11 @@
 
 (representation/register-representation
   ::pull-form
+  ;; TODO Hmm... because we would like pull-expr to supply context when context is nil, it would be nice to add this bit of logic as a context resolution extension
   (fn [app [_ context] [pull-expr pull-data-or-id]]
-    (let [pull-data-or-id (utils/deref-or-value pull-data-or-id)
+    ;; Supplying nil to pull expr leaves it inferred via context, dat.view/entity-pull, and dat.view/base-pull, in that order
+    (let [pull-expr (deref-or-value (or pull-expr (::pull-expr context) @(entity-pull app pull-data-or-id) base-pull))
+          pull-data-or-id (utils/deref-or-value pull-data-or-id)
           local-context (:dat.view.context/locals context)
           eid (cond
                 ;; id or lookup ref
@@ -1169,27 +1175,40 @@
 
 (defn pull-form
   "Renders a form with defaults from pull data, or for an existing entity, subject to optional specification of a
-  pull expression (possibly annotated with context metadata), a context map"
-  ;; How to make this language context based...
-  ([app pull-data-or-eid]
-   [pull-form app @(entity-pull app pull-data-or-eid) pull-data-or-eid])
-  ([app pull-expr pull-data-or-eid]
-   (pull-form app (meta-context pull-expr) pull-expr pull-data-or-eid))
-  ([app context pull-expr pull-data-or-eid]
-   (when pull-data-or-eid
-     [represent app [::pull-form context] [pull-expr pull-data-or-eid]])))
+  pull expression (possibly annotated with context metadata; or nil, if pull-expr should be inferred), a context map
+  (which itself may contain a `:dat.view/pull-expr`), and either pull data, or a lookup ref or eid corresponding to data which should be pulled."
+  ([app pull-data-or-id]
+   [pull-form app nil pull-data-or-id])
+  ;; QUESTION Should really decide whether we want the 3-arity to be `[app context data]` or `[app pull-expr data]`.
+  ([app pull-expr pull-data-or-id]
+   [pull-form app nil pull-expr pull-data-or-id])
+  ([app context pull-expr pull-data-or-id]
+   (when pull-data-or-id
+     ;; For now, we'll get around the todo item on ::pull-form relating to context from pull-expr by using this little piece of logic here.
+     ;; Would be nice to move into rep though, as discussed there...
+     (let [context (if (and pull-expr (not context))
+                     (meta-context pull-expr)
+                     context)]
+       [represent app [::pull-form (or context {})] [pull-expr pull-data-or-id]]))))
 
+(representation/register-representation
+  ::edit-entity-form
+  (fn [app [_ context] eid]
+    (if-let [eid @(pull-attr (:conn app) eid :db/id)]
+      [:div v-box-styles
+       ;; QUESTION TODO How do we add from our ::pull-summary-attributes to base-pull here? Do we need another option? Use type?
+       [:h3 "Editing entity"]; [pull-summary-string @(safe-pull (:conn app) base-pull eid)]] ; QUESTION why doesn't this work?
+       [pull-form app context nil eid]
+       (when (:dat.view.edit/preview context)
+         [:div v-box-styles
+          [:h4 "Preview:"]
+          [pull-view app context nil eid]])]
+      [loading-notification "Please wait; form data is loading."])))
 
 (defn edit-entity-form
-  [app eid]
-  (if-let [eid @(pull-attr (:conn app) eid :db/id)]
-    (let [pull-expr @(entity-pull app eid)]
-      [re-com/v-box :children [;[debug "Pull data:" @(posh/pull (:conn app) '[* {:e/type [*]}] eid)]
-                               [:h3 "Editing " (pull-summary-string @(posh/pull (:conn app) pull-expr eid))]
-                               [pull-form app eid]
-                               [:h4 "Preview:"]
-                               [pull-view app pull-expr eid]]])
-    [loading-notification "Please wait; form data is loading."]))
+  "This is a somewhat higher level representation/control than ::pull-form. It is meant to be used as the outer most layer."
+  [app context eid]
+  [represent app [::edit-entity-form context] eid])
 
 
 ;; These are our new goals
@@ -1222,6 +1241,7 @@
 
 
 ;; XXX Note; recursive isComponent attribute relations break this
+;; BIG TODO QUESTION Figure out how we deal with the different needs of base-pull between view and control contexts; Don't always want forms for things we might just pull along for ride on view, & vice versa
 (def type-pull
   (memoize
     (fn type-pull*
@@ -1267,12 +1287,17 @@
                                     {:ref true})}
                                  {(:db/ident attr)
                                   ;; TODO Handle these
-                                  (-> (::pull-summary-attrs context)
-                                      (get (:db/ident attr))
-                                      (concat [:e/name :e/description :db/ident {:e/type [:db/id :db/ident]}])
-                                      vec
-                                      (with-meta {;::representation ::pull-summary-view
-                                                  ::collapsed? true ::collapsable? true}))})
+                                  (do
+                                    (when (#{:run/overcoats} (:db/ident attr))
+                                      (log/debug "Some jazz happened;"
+                                        (-> (::pull-summary-attrs context))))
+                                            ;(get (:db/ident attr)))))
+                                    (-> (::pull-summary-attrs context)
+                                        (get (:db/ident attr))
+                                        (concat [:e/name :e/description :db/ident {:e/type [:db/id :db/ident]}])
+                                        vec
+                                        (with-meta {;::representation ::pull-summary-view
+                                                    ::collapsed? true ::collapsable? true})))})
                                (:db/ident attr))))
                       ;; Oh... shouldn't need this. This was probably because of the component refs?
                       (remove nil?)
@@ -1358,8 +1383,14 @@
 (swap! context/default-base-context
   utils/deep-merge
   ;; Top level just says that this is our configuration? Or is that not necessary?
-  {::base-config
-   {::pull-form
+  {
+   ;; TODO Need to add another option of lower precedence that applies as the base of _all_ components
+   ;::base-context
+   ;{:dom/attrs {:style bordered-box-style}}
+   ;; TODO This should be renamed as representation config or something
+   ::base-config
+   {; don't need this if we have base-context
+    ::pull-form
     {:dom/attrs {:style bordered-box-style}}
     ::attr-values-view
     {:dom/attrs {:style h-box-styles}

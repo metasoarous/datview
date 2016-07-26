@@ -33,7 +33,7 @@
             [cljs.core.match :as match :refer-macros [match]]
             [markdown.core :as md]
             [dat.view.styles :as styles]
-            [re-com.input-time :as input-time]))
+            [re-com.input-time]))
 
 
 
@@ -276,7 +276,7 @@
 (representation/register-representation
   ::pull-summary-string
   (fn [_ _ pull-data]
-    [:span (pull-summary-string pull-data)]))
+    [re-com/label :label (pull-summary-string pull-data)]))
 
 
 (representation/register-representation

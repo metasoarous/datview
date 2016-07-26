@@ -526,7 +526,9 @@
           ;; TODO Insert collapse here
           ;; here we go on collapse
           collapse-attribute? (r/atom (::collapsed? context))
-          edit? (r/atom nil)]
+          edit? (r/atom nil)
+          copy? (r/atom nil)
+          copy (r/atom nil)]
       (fn [app [_ context] pull-data]
         (let [local-context (:dat.view.context/locals context)
               collapsable? (::collapsable? context)
@@ -550,7 +552,9 @@
                [represent app [::pull-summary-view local-context] pull-data]
                (let [local-context (assoc local-context
                                      ::controls (::controls context)
-                                     ::edit? edit?)]
+                                     ::edit? edit?
+                                     ::copy? copy?
+                                     ::copy copy)]
                  [represent app [::control-set local-context] pull-data])]
               ;; XXX TODO Questions:
               ;; Need a react-id function that lets us repeat attrs when needed
@@ -565,7 +569,14 @@
                                      ;; Part of clever trick to avoid having to rerender form when toggling
                                      (when-not @edit? {:display "none"}))}
                   [:h3 "Editing"]
-                  [represent app [::pull-form local-context] [pull-expr pull-data]]])])])))))
+                  [represent app [::pull-form local-context] [pull-expr pull-data]]])
+              (when-not (nil? @copy?)
+                [:div {:style (merge h-box-styles
+                                     {:padding "15px"}
+                                     ;; Part of clever trick to avoid having to rerender form when toggling
+                                     (when-not @copy? {:display "none"}))}
+                 [:h3 "Copying"]
+                 [represent app [::pull-form local-context] [pull-expr pull-data]]])])])))))
 
 
 ;; See definition below

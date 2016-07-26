@@ -376,14 +376,17 @@
 
 (representation/register-representation
   ::edit-entity-control
-  (fn [app _ pull-data]
+  (fn [app [_ context] pull-data]
     (let [pull-data (utils/deref-or-value pull-data)]
       [re-com/md-icon-button :md-icon-name "zmdi-edit"
        :style {:margin-right "10px"}
        :size :smaller
        :tooltip "Edit entity"
        ;; This assumes the pull has :dat.sync.remote.db/id... automate?
-       :on-click (fn [] (router/set-route! app {:handler :edit-entity :route-params {:db/id (:dat.sync.remote.db/id pull-data)}}))])))
+       ;; This now just toggles an edit? r/atom passed down by the parent, so the parent is responsible for rendering.
+       :on-click (fn [] (swap! (::edit? context) not))])))
+                        ;; Should be possible to specify the callback here so you could do the old behavior of routing to a form as well
+                        ;(router/set-route! app {:handler :edit-entity :route-params {:db/id (:dat.sync.remote.db/id pull-data)}}))])))
 
 
 ;; TODO Need a way to figure out which controls are needed for a given component
@@ -402,6 +405,7 @@
          ^{:key (hash control-id)}
          [represent app [control-id local-context] data])])))
 
+;(defn controls-middleware)
 
 
 ;; TODO Set up defaults ::copy-entity-control ::edit-entity-control
@@ -521,7 +525,8 @@
     (let [;; TODO Ignoring the component context
           ;; TODO Insert collapse here
           ;; here we go on collapse
-          collapse-attribute? (r/atom (::collapsed? context))]
+          collapse-attribute? (r/atom (::collapsed? context))
+          edit? (r/atom nil)]
       (fn [app [_ context] pull-data]
         (let [local-context (:dat.view.context/locals context)
               collapsable? (::collapsable? context)
@@ -539,16 +544,28 @@
              ;  [represent app [::value-view context] value]
              [:div (:dom/attrs context)
               ;[debug "Pull data view context: " context]
-              [:div
-                [represent app [::control-set local-context] pull-data]
-                [:div {:style (merge h-box-styles)}
-                 [represent app [::pull-summary-view local-context] pull-data]]]
+              [:div {:style (merge v-box-styles)}
+               ;"Fuck you"
+               ;[frisk/FriskInline context]
+               [represent app [::pull-summary-view local-context] pull-data]
+               (let [local-context (assoc local-context
+                                     ::controls (::controls context)
+                                     ::edit? edit?)]
+                 [represent app [::control-set local-context] pull-data])]
               ;; XXX TODO Questions:
               ;; Need a react-id function that lets us repeat attrs when needed
               (for [attr-ident (pull-attributes pull-expr pull-data)]
                 (when-let [values (get pull-data attr-ident)]
                   ^{:key (hash attr-ident)}
-                  [represent app [::attr-view (assoc local-context :db.attr/ident attr-ident)] values]))])])))))
+                  [represent app [::attr-view (assoc local-context :db.attr/ident attr-ident)] values]))
+              ;; Part of clever trick to avoid having to rerender form when toggling
+              (when-not (nil? @edit?)
+                [:div {:style (merge h-box-styles
+                                     {:padding "15px"}
+                                     ;; Part of clever trick to avoid having to rerender form when toggling
+                                     (when-not @edit? {:display "none"}))}
+                  [:h3 "Editing"]
+                  [represent app [::pull-form local-context] [pull-expr pull-data]]])])])))))
 
 
 ;; See definition below
@@ -1380,10 +1397,7 @@
   utils/deep-merge
   ;; Top level just says that this is our configuration? Or is that not necessary?
   {
-   ;; TODO Need to add another option of lower precedence that applies as the base of _all_ components
-   ;::base-context
-   ;{:dom/attrs {:style bordered-box-style}}
-   ;; TODO This should be renamed as representation config or something
+   ;; QUESTION This these be renamed representation-context etc?
    ::base-config
    {; don't need this if we have base-context
     ::pull-form
@@ -1406,10 +1420,8 @@
     {:dom/attrs {:style (merge h-box-styles
                                bordered-box-style
                                {:padding "8px 15px"
-                                :width "100%"})}}
-     ;; Hmm... maybe this should point to the keyword so it can grab from there?
-     ;::summary pull-summary-view
-     ;::component pull-view}
+                                :width "100%"})}
+     ::controls [::copy-entity-control ::edit-entity-control]}
     ;; XXX This should change shortly...
     ::pull-view-controls
     {:dom/attrs {:style (merge h-box-styles

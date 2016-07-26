@@ -33,7 +33,7 @@
             [cljs.core.match :as match :refer-macros [match]]
             [markdown.core :as md]
             [dat.view.styles :as styles]
-            [re-com.input-time :as input-time]))
+            [re-com.input-time]))
 
 
 
@@ -276,14 +276,14 @@
 (representation/register-representation
   ::pull-summary-string
   (fn [_ _ pull-data]
-    [:span (pull-summary-string pull-data)]))
+    [re-com/label :label (pull-summary-string pull-data)]))
 
 
 (representation/register-representation
   ::pull-summary-view
   (fn [app [_ context] pull-data]
     [:div {:style {:font-weight "bold" :padding "5px" :align-self "end"}}
-     [represent app [::pull-summary-string (:dat.view.context/locals context) pull-data]]]))
+     [represent app [::pull-summary-string (:dat.view.context/locals context)] pull-data]]))
 
 (defn pull-summary-view
   [app context pull-data]
@@ -566,7 +566,7 @@
                             (assoc ::pull-expr pull-expr))]
       ;; TODO We are also associng in the pull expr above somewhere; Should make these play nice together and decide on precedence
       [:div
-       [frisk/FriskInline (posh/pull-info (:conn app) pull-expr eid)]
+       ;;[frisk/FriskInline (posh/pull-info (:conn app) pull-expr eid)]
        [represent app [::pull-data-view child-context] pull-data]])))
 
 
@@ -745,8 +745,8 @@
                        (cljs-time/year dt)
                        (cljs-time/month dt)
                        (cljs-time/day dt)
-                       (input-time/time->hrs time-int)
-                       (input-time/time->mins time-int)
+                       (re-com.input-time/time->hrs time-int)
+                       (re-com.input-time/time->mins time-int)
                        (cljs-time/second dt)
                        (cljs-time/milli dt))
                                  ;; FIXME: 2400 + second & milli does not exist

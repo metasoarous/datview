@@ -830,7 +830,6 @@
 
 
 
-
 (defn boolean-selector
   [app eid attr-ident value]
   (let [current-value (atom value)]
@@ -1408,7 +1407,7 @@
   utils/deep-merge
   ;; Top level just says that this is our configuration? Or is that not necessary?
   {
-   ;; QUESTION This these be renamed representation-context etc?
+   ;; QUESTION These should be be renamed representation-context etc?
    ::base-config
    {; don't need this if we have base-context
     ::pull-form

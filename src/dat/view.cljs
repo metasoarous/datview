@@ -276,13 +276,13 @@
 (representation/register-representation
   ::pull-summary-string
   (fn [_ _ pull-data]
-    [re-com/label :label (pull-summary-string pull-data)]))
+    [:span #_:label (pull-summary-string pull-data)]))
 
 
 (representation/register-representation
   ::pull-summary-view
   (fn [app [_ context] pull-data]
-    [:div {:style {:font-weight "bold" :padding "5px" :align-self "end"}}
+    [:div (:dom/attrs context)
      [represent app [::pull-summary-string (:dat.view.context/locals context)] pull-data]]))
 
 (defn pull-summary-view
@@ -482,7 +482,9 @@
           local-context (:dat.view.context/locals context)
           child-context (merge local-context (get-in local-context [::ref-attrs attr-ident]))]
       [:div (:dom/attrs context)
-       [represent app [::label-view (assoc child-context ::attr-signature attr-signature)] attr-ident]
+       [:div {:style (merge dat.view/v-box-styles)}
+        [represent app [::label-view (assoc child-context ::attr-signature attr-signature)] attr-ident]
+        [represent app [::control-set (assoc child-context ::controls (::controls context))] values]]
        (match [attr-signature]
          [{:db/cardinality :db.cardinality/many}]
          [represent app [::attr-values-view child-context] values]
@@ -526,7 +528,7 @@
           ;; TODO Insert collapse here
           ;; here we go on collapse
           collapse-attribute? (r/atom (::collapsed? context))
-          edit? (r/atom nil)
+          edit? (r/atom true)
           copy? (r/atom nil)
           copy (r/atom nil)]
       (fn [app [_ context] pull-data]
@@ -541,14 +543,8 @@
              [collapse-summary app context pull-data])
            ;(defn pull-summary-view [app pull-expr pull-data]
            (when (or (not collapsable?) (and collapsable? (not @collapse-attribute?)))
-             ;(for [value (utils/deref-or-value pull-data)]
-             ;  ^{:key (hash value)}
-             ;  [represent app [::value-view context] value]
              [:div (:dom/attrs context)
-              ;[debug "Pull data view context: " context]
               [:div {:style (merge v-box-styles)}
-               ;"Fuck you"
-               ;[frisk/FriskInline context]
                [represent app [::pull-summary-view local-context] pull-data]
                (let [local-context (assoc local-context
                                      ::controls (::controls context)
@@ -597,7 +593,6 @@
                             (assoc ::pull-expr pull-expr))]
       ;; TODO We are also associng in the pull expr above somewhere; Should make these play nice together and decide on precedence
       [:div
-       ;;[frisk/FriskInline (posh/pull-info (:conn app) pull-expr eid)]
        [represent app [::pull-data-view child-context] pull-data]])))
 
 
@@ -660,7 +655,6 @@
 
 
 (declare pull-form)
-(declare pull-data-form)
 
 (defn cast-value-type
   [value-type-ident str-value]
@@ -868,9 +862,10 @@
     (let [attr @(attribute-signature-reaction app attr-ident)
           pull-expr (::pull-expr context)
           local-context (:dat.view.context/locals context)]
-      [:div
-       ;[frisk/FriskInline context]
-       [represent app [::control-set context] [eid attr-ident value]]
+      [:div (:dom/attrs context)
+       ;; TODO This crap should be taken care of by middleware
+       (let [control-context (assoc local-context ::controls (::controls context))]
+         [represent app [::control-set control-context] [eid attr-ident value]])
        (match [attr]
          ;; The first two forms here have to be compbined and the decision about whether to do a dropdown
          ;; left as a matter of the context (at least for customization); For now leaving though... XXX
@@ -882,8 +877,8 @@
                ;; Need to handle situation of a recur point ('...) as a specification; Should be the context pull root, or the passed in expr, if needed
                sub-expr (if (= sub-expr '...) (or (:dat.view/root-pull-expr context) pull-expr) sub-expr)
                local-context (if (:dat.view/root-pull-expr context)
-                               context
-                               (assoc context :dat.view/root-pull-expr pull-expr))]
+                               local-context
+                               (assoc local-context :dat.view/root-pull-expr pull-expr))]
            ;(when-not (= (:db/cardinality attr) :db.cardinality/many)
            ;;(nil? value))
            [pull-form app local-context sub-expr value])
@@ -914,7 +909,9 @@
           :on-change (make-change-handler app eid attr-ident value)])])))
 
 
-(defn create-type-reference
+;; TODO Need to have some way of wrapping or overriding this in certain cases; How do we make this part of more default controls orthogonal?
+;; For right now putting the main functionality inside a star function, then wrapping it in a dynamic var so you can override it, while still referring to the default functionality
+(defn create-type-reference*
   [app eid attr-ident type-ident]
   (send-tx!
     app
@@ -924,6 +921,10 @@
     ;; Could maybe work with a ref [:db/ident type-ident], but I don't know if these are supported in tx
     [{:db/id -1 :e/type type-ident}
      [:db/add eid attr-ident -1]]))
+
+(defn ^:dynamic create-type-reference
+  [app eid attr-ident type-ident]
+  (create-type-reference* app eid attr-ident type-ident))
 
 
 ;; TODO Need to rewrite in terms of representations
@@ -976,6 +977,7 @@
      :children inputs]]])
 
 ;; TODO Need to rewrite in terms of control represetnations (and make more abstract and ref attr-type based)
+;; needs to be a control on the attr-view
 (defn add-reference-button
   "Simple add reference button"
   ([tooltip on-click-fn]
@@ -986,6 +988,8 @@
     :tooltip tooltip])
   ([on-click-fn]
    (add-reference-button "Add entity" on-click-fn)))
+
+
 
 ;; Similarly, should have another function for doing the main simple operation here XXX
 (defn add-reference-for-type-button
@@ -1012,31 +1016,25 @@
    (add-reference-button "Add entity" modal-popup)))
 
 
-(representation/register-representation
-  ::add-reference-control
-  (fn [app [_ context] data]))
-
-
-(defn with-controls
-  [representation-fn]
-  (fn [app [representation-id context-data] data]
-    (if-let [controls (:dat.view/controls context-data)]
-      [:div {:style h-box-styles}
-       [represent app [:dat.view/control-set context-data] data]
-       [representation-fn app [representation-id (dissoc context-data :dat.view/controls)] data]])))
+;(defn with-controls
+;  [representation-fn]
+;  (fn [app [representation-id context-data] data]
+;    (if-let [controls (::controls context-data)]
+;      [:div {:style h-box-styles}
+;       [represent app [::control-set (assoc context-data ::controls controls)] data]
+;       [representation-fn app [representation-id (dissoc context-data :dat.view/controls)] data]])))
 
 
 ;; Again; need to think about the right way to pass through the attribute data here
-;
+
+;; XXX comments here thinking about how we semantically break down what's going on here for datview layers
 (representation/register-representation
-  ::fields-for
-  ;[with-controls]
-  ;; So first we get attr-signature and config
-  ;; TODO Should make this also ok with not passing in the value(s) so that it can pull for you...
-  (fn [app [_ context] [eid attr-ident value]]
-    (let [attr-sig (attribute-signature-reaction app attr-ident)
-          ;; Should move all this local state in conn db if possible... XXX
+  ::add-reference-button
+  (fn [app [_ context] [eid attr-ident values]]
+    (let [;; subscriptions
+          attr-sig @(context/attribute-signature-reaction app attr-ident)
           activate-type-selector? (r/atom false)
+          ;; control state (move as much as possible to conn, and just subscribe, but should be possible to insert temp state as well)
           selected-type (r/atom nil)
           cancel-fn (fn []
                       (reset! activate-type-selector? false)
@@ -1047,6 +1045,30 @@
                   (create-type-reference app eid attr-ident @selected-type)
                   (reset! selected-type nil)
                   false)]
+      (fn [app [_ context] [eid attr-ident _]]
+        (let [type-idents (:attribute.ref/types attr-sig)]
+          [:div
+           [add-reference-button (fn []
+                                   (cond
+                                     (> (count type-idents) 1)
+                                     (reset! activate-type-selector? true)
+                                     ;; Should specifically catch this and let user select from any possible type; or maybe a defaults? context?
+                                     (= (count type-idents) 0)
+                                     (js/alert "No types associated with this attribute; This will be allowed in the future, till then please find/file a GH issue to show interest.")
+                                     :else
+                                     (create-type-reference app eid attr-ident (first type-idents))))]
+           ;; Need a flexible way of specifying which attributes need special functions associated in form
+           (when @activate-type-selector?
+             [re-com/modal-panel
+              :child [attr-type-selector type-idents selected-type ok-fn cancel-fn]])])))))
+
+(representation/register-representation
+  ::fields-for
+  ;[with-controls]
+  ;; So first we get attr-signature and config
+  ;; TODO Should make this also ok with not passing in the value(s) so that it can pull for you...
+  (fn [app [_ context] [eid attr-ident value]]
+    (let []
       ;; TODO Need to add sorting functionality here...
       (fn [app [_ context] [eid attr-ident value]]
         (let [pull-expr (::pull-expr context)
@@ -1057,40 +1079,21 @@
           ;; Ug... can't get around having to duplicate :field and label-view
           (when (and eid
                      (not (or (:attribute/hidden? context) (#{:db/id :db/ident} attr-ident))))
-            (let [type-idents (:attribute.ref/types @attr-sig)]
               ;; Are controls still separated this way? Should they be?
               ;[:div {:style h-box-styles}
               [:div (:dom/attrs context)
-               [field-for-skeleton app attr-ident
-                ;; Right now these can't "move" because they don't have keys XXX Should fix with another component
-                ;; nesting...
-                ;; All of these things should be rewritten in terms of controls, and controls should be more cleanly separated out in context XXX
-                [(when (= :db.cardinality/many (:db/cardinality @attr-sig))
-                   ^{:key (hash :add-reference-button)}
-                   [add-reference-button (fn []
-                                           (cond
-                                             (> (count type-idents) 1)
-                                             (reset! activate-type-selector? true)
-                                             ;; Should specifically catch this and let user select from any possible type; or maybe a defaults? context?
-                                             (= (count type-idents) 0)
-                                             (js/alert "No types associated with this attribute; This will be allowed in the future, till then please find/file a GH issue to show interest.")
-                                             :else
-                                             (create-type-reference app eid attr-ident (first type-idents))))])
-                 ;; Need a flexible way of specifying which attributes need special functions associated in form
-                 (when @activate-type-selector?
-                   ^{:key (hash :attr-type-selector)}
-                   [re-com/modal-panel
-                    :child [attr-type-selector type-idents selected-type ok-fn cancel-fn]])]
-                ;; Then for the actual value...
-                ;(for [value (or (seq (utils/deref-or-value value)) [nil])]
-                (for [value (let [value (utils/deref-or-value value)]
-                              (or
-                                (and (sequential? value) (seq value))
-                                (and value [value])
-                                [nil]))]
-                  ^{:key (hash {:component :field-for :eid eid :attr-ident attr-ident :value value})}
-                  [represent app [::input-for local-context] [eid attr-ident value]])]])))))))
-                  ;[input-for app context-data pull-expr eid attr-ident value])]])))))))
+               [:div {:style h-box-styles}
+                [label-view app attr-ident]
+                (let [control-context (assoc local-context ::controls (::controls context))]
+                  [represent app [::control-set control-context] [eid attr-ident value]])]
+               (for [value (let [value (utils/deref-or-value value)]
+                             (or
+                               (and (sequential? value) (seq value))
+                               (and value [value])
+                               [nil]))]
+                 ^{:key (hash {:component :field-for :eid eid :attr-ident attr-ident :value value})}
+                 [represent app [::input-for local-context] [eid attr-ident value]])]))))))
+                 ;[input-for app context-data pull-expr eid attr-ident value])]])))))))
 
 ;; TODO Need to rewrite with saner arity
 (defn field-for
@@ -1444,13 +1447,18 @@
     ::pull-summary-view
     {:dom/attrs {:style (merge v-box-styles
                                {:padding "15px"
-                                :font-size "18px"
+                                :font-size "12px"
                                 :font-weight "bold"})}}
+                ; saved from inline
+                ;{:style {:font-weight "bold" :padding "5px" :align-self "end"}}}
      ;::component pull-summary-view}
     ::fields-for
-    {:dom/attrs {:style v-box-styles}}}
+    {:dom/attrs {:style (merge v-box-styles
+                               {:padding "7px"})}}}
+    ;::input-for
+    ;{:dom/attrs {:style {:padding "4px"}}}}
    ;; Specifications merged in for any config with a certain cardinality
-   ::card-config {}
+   ::card-config {:db.cardinality/many {::fields-for {::controls [::add-reference-button]}}}
    ;; Specifications merged in for any value type
    ::value-type-config {}
    ::attr-config {:db/id {::fields-for {:attribute/hidden? true

@@ -115,7 +115,7 @@
     ([app]
      (reaction
        ;; Don't need this arity if we drop the distinction between base-context and default-base-context
-       (merge
+       (utils/deep-merge
          @default-base-context
          @(base-context app))))
     ([app representation-id]
@@ -125,17 +125,20 @@
                              :keys [;; When the component is in a scope closed over by some particular attribute:
                                     db.attr/ident]}] ;; db/ident of the attribute; precedence below
      (reaction
-       (let [base-context @(component-context app)]
-         (merge
-           (get-in base-context [:dat.view/base-config representation-id])
-           (when ident
-             (let [attr-sig @(attribute-signature-reaction app ident)]
-               (merge
-                 (get-in base-context [:dat.view/card-config (:db/cardinality attr-sig) representation-id])
-                 (get-in base-context [:dat.view/value-type-config (:db/valueType attr-sig) representation-id])
-                 (get-in base-context [:dat.view/attr-config ident]))))
-             ;; Need to also get the value type and card config by the attr-config if that's all that's present; Shouldn't ever
-             ;; really need to pass in manually XXX
-           local-context
-           {::locals local-context}))))))
+       (try
+         (let [base-context @(component-context app)]
+           (merge
+             (get-in base-context [:dat.view/base-config representation-id])
+             (when ident
+               (let [attr-sig @(attribute-signature-reaction app ident)]
+                 (merge
+                   (get-in base-context [:dat.view/card-config (:db/cardinality attr-sig) representation-id])
+                   (get-in base-context [:dat.view/value-type-config (:db/valueType attr-sig) representation-id])
+                   (get-in base-context [:dat.view/attr-config ident representation-id]))))
+               ;; Need to also get the value type and card config by the attr-config if that's all that's present; Shouldn't ever
+               ;; really need to pass in manually XXX
+             local-context
+             {::locals local-context}))
+         (catch :default e
+           (log/error e "Unable to build component context for local-context:" local-context "representation-id" representation-id)))))))
 

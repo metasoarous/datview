@@ -710,7 +710,7 @@
   stuff)
 
 (def ref-attr-options
-  ;(memoize
+  (memoize
     (fn
       ([app attr-ident]
        (ref-attr-options app attr-ident :db/id))
@@ -726,7 +726,7 @@
          deref
          (sort-by sort-key)
          vec
-         reaction))))
+         reaction)))))
 
 ;; TODO Need constext here for a better sort-by specification; switch to representation
 (defn select-entity-input
@@ -876,6 +876,7 @@
          (let [sub-expr (some #(get % attr-ident) pull-expr) ;; XXX This may not handle a ref not in {}
                ;; Need to handle situation of a recur point ('...) as a specification; Should be the context pull root, or the passed in expr, if needed
                sub-expr (if (= sub-expr '...) (or (:dat.view/root-pull-expr context) pull-expr) sub-expr)
+               local-context (assoc local-context ::pull-expr sub-expr)
                local-context (if (:dat.view/root-pull-expr context)
                                local-context
                                (assoc local-context :dat.view/root-pull-expr pull-expr))]
@@ -1078,22 +1079,22 @@
               local-context (:dat.view.context/locals context)]
           ;; Ug... can't get around having to duplicate :field and label-view
           (when (and eid
-                     (not (or (:attribute/hidden? context) (#{:db/id :db/ident} attr-ident))))
-              ;; Are controls still separated this way? Should they be?
-              ;[:div {:style h-box-styles}
-              [:div (:dom/attrs context)
-               [:div {:style h-box-styles}
-                [label-view app attr-ident]
-                (let [control-context (assoc local-context ::controls (::controls context))]
-                  [represent app [::control-set control-context] [eid attr-ident value]])]
-               (for [value (let [value (utils/deref-or-value value)]
-                             (or
-                               (and (sequential? value) (seq value))
-                               (and value [value])
-                               [nil]))]
-                 ^{:key (hash {:component :field-for :eid eid :attr-ident attr-ident :value value})}
-                 [represent app [::input-for local-context] [eid attr-ident value]])]))))))
-                 ;[input-for app context-data pull-expr eid attr-ident value])]])))))))
+                   (not (or (:attribute/hidden? context) (#{:db/id :db/ident} attr-ident))))
+            ;; Are controls still separated this way? Should they be?
+            ;[:div {:style h-box-styles}
+            [:div (:dom/attrs context)
+             [:div {:style h-box-styles}
+              [label-view app attr-ident]
+              (let [control-context (assoc local-context ::controls (::controls context))]
+                [represent app [::control-set control-context] [eid attr-ident value]])]
+             (for [value (let [value (utils/deref-or-value value)]
+                           (or
+                             (and (sequential? value) (seq value))
+                             (and value [value])
+                             [nil]))]
+               ^{:key (hash {:component :field-for :eid eid :attr-ident attr-ident :value value})}
+               [represent app [::input-for local-context] [eid attr-ident value]])]))))))
+               ;[input-for app context-data pull-expr eid attr-ident value])]])))))))
 
 ;; TODO Need to rewrite with saner arity
 (defn field-for
@@ -1258,17 +1259,19 @@
 ;; ## Constructing queries with metadata annotations
 
 
-(defn type-data
-  [app base-type]
-  (safe-pull
-    (:conn app)
-    '[:db/id :db/ident :db/isComponent
-      {:e/type ...
-       :e.type/isa ...
-       :e.type/attributes ...
-       :db/valueType ...
-       :attribute.ref/types ...}]
-    base-type))
+(def type-data
+  ^{:arglist '([app base-type])}
+  (memoize
+    (fn [app base-type]
+      (safe-pull
+        (:conn app)
+        '[:db/id :db/ident :db/isComponent
+          {:e/type ...
+           :e.type/isa ...
+           :e.type/attributes ...
+           :db/valueType ...
+           :attribute.ref/types ...}]
+        base-type))))
 
 
 ;; XXX Note; recursive isComponent attribute relations break this
@@ -1336,7 +1339,7 @@
 
 
 (def entity-pull
-  ;(memoize
+  (memoize
     (fn entity-pull*
       [app entity-or-eid]
       (cond
@@ -1351,7 +1354,7 @@
               @(type-pull app type-id)
               (do
                 (log/warn "Bad type id for entity-or-eid: " entity-or-eid)
-                base-pull)))))))
+                base-pull))))))))
 
 
 ;; This is effectively our metadata model

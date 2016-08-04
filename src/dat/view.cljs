@@ -202,7 +202,7 @@
 (def base-context context/base-context)
 (def update-base-context! context/update-base-context!)
 (def set-base-context! context/set-base-context!)
-(def attribute-signature-reaction context/attribute-signature-reaction)
+(def attr-signature-reaction context/attr-signature-reaction)
 (def attribute-schema-reaction context/attribute-schema-reaction)
 (def component-context context/component-context)
 
@@ -425,7 +425,7 @@
   ;; QUESTION Should attr-ident be part of the context-data?
   (fn [app [_ context] value]
     (let [attr-ident (:db.attr/ident context)
-          attr-sig @(attribute-signature-reaction app attr-ident)]
+          attr-sig @(attr-signature-reaction app attr-ident)]
       [:div (:dom/attrs context)
        ;[debug "context dom/attrs:" (:dom/attrs context)]
        (match [attr-sig]
@@ -478,7 +478,7 @@
   ::attr-view
   (fn [app [_ context] values]
     (let [attr-ident (:db.attr/ident context)
-          attr-signature @(attribute-signature-reaction app attr-ident)
+          attr-signature @(attr-signature-reaction app attr-ident)
           local-context (:dat.view.context/locals context)
           child-context (merge local-context (get-in local-context [::ref-attrs attr-ident]))]
       [:div (:dom/attrs context)
@@ -499,6 +499,27 @@
 ;; All rendering modes should be controllable via registered toggles or fn assignments
 ;; registration modules for plugins
 ;; * middleware?
+
+
+(defn attr-entity-order
+  [attr-data]
+  (or (:e/order attr-data)
+      (cond
+        (:db/isComponent attr-data) 10
+        (:db.type/ref? attr-data) 5
+        :else 0)))
+
+(defonce attr-order
+  (memoize
+    (fn [app attr]
+      (reaction
+        (cond
+          (keyword? attr)
+          (attr-entity-order
+            @(attr-signature-reaction app attr))
+          (map? attr)
+          (attr-entity-order attr))))))
+
 
 (defn pull-attributes
   ([pull-expr pull-data]
@@ -554,7 +575,8 @@
                  [represent app [::control-set local-context] pull-data])]
               ;; XXX TODO Questions:
               ;; Need a react-id function that lets us repeat attrs when needed
-              (for [attr-ident (pull-attributes pull-expr pull-data)]
+              (for [attr-ident (sort-by (comp deref (partial attr-order app))
+                                        (pull-attributes pull-expr pull-data))]
                 (when-let [values (get pull-data attr-ident)]
                   ^{:key (hash attr-ident)}
                   [represent app [::attr-view (assoc local-context :db.attr/ident attr-ident)] values]))
@@ -709,7 +731,7 @@
     (log/debug "label: " (:label x)))
   stuff)
 
-(def ref-attr-options
+(defonce ref-attr-options
   (memoize
     (fn
       ([app attr-ident]
@@ -859,7 +881,7 @@
   ::input-for
   (fn [app [_ context] [eid attr-ident value]]
     ;; TODO Need to rewrite in terms of representations
-    (let [attr @(attribute-signature-reaction app attr-ident)
+    (let [attr @(attr-signature-reaction app attr-ident)
           pull-expr (::pull-expr context)
           local-context (:dat.view.context/locals context)]
       [:div (:dom/attrs context)
@@ -1033,7 +1055,7 @@
   ::add-reference-button
   (fn [app [_ context] [eid attr-ident values]]
     (let [;; subscriptions
-          attr-sig @(context/attribute-signature-reaction app attr-ident)
+          attr-sig @(context/attr-signature-reaction app attr-ident)
           activate-type-selector? (r/atom false)
           ;; control state (move as much as possible to conn, and just subscribe, but should be possible to insert temp state as well)
           selected-type (r/atom nil)
@@ -1199,7 +1221,8 @@
         (map? pull-data-or-id)
         [:div (:dom/attrs context)
          ;(for [[attr-ident values] (pull-attr-values app pull-expr pull-data-or-id)]
-         (for [attr-ident (pull-attributes pull-expr pull-data-or-id)]
+         (for [attr-ident (sort-by (comp deref (partial attr-order app))
+                                   (pull-attributes pull-expr pull-data-or-id))]
            (let [values (get pull-data-or-id attr-ident)]
              ^{:key (hash attr-ident)}
              ;; Need to assoc in the attr-ident to context as well, so the correct context can be prepared for the child representation
@@ -1259,7 +1282,7 @@
 ;; ## Constructing queries with metadata annotations
 
 
-(def type-data
+(defonce type-data
   ^{:arglist '([app base-type])}
   (memoize
     (fn [app base-type]
@@ -1276,7 +1299,7 @@
 
 ;; XXX Note; recursive isComponent attribute relations break this
 ;; BIG TODO QUESTION Figure out how we deal with the different needs of base-pull between view and control contexts; Don't always want forms for things we might just pull along for ride on view, & vice versa
-(def type-pull
+(defonce type-pull
   (memoize
     (fn type-pull*
       ([app base-type]
@@ -1301,11 +1324,7 @@
                                 :attribute.ref/types [{:db/ident :e.type/Type
                                                        :e.type/attributes [{:db/ident :db/id}
                                                                            {:db/ident :db/ident}]}]}])
-                      (sort-by (fn [attr] (or (:e/order attr)
-                                              (cond
-                                                (:db/isComponent attr) 2
-                                                (:db.type/ref? attr) 1
-                                                :else 0))))
+                      (sort-by attr-entity-order)
                       ;; TODO Take into account isa subtypes and super types
                       (map (fn [attr]
                              (if (:db.type/ref? attr)
@@ -1338,7 +1357,7 @@
              type-data)))))))
 
 
-(def entity-pull
+(defonce entity-pull
   (memoize
     (fn entity-pull*
       [app entity-or-eid]

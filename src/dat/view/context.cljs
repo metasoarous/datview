@@ -87,7 +87,7 @@
                          [:db/ident attr-ident])))))
 
 ;; Another function gives us a version of this that maps properly to idents
-(def attribute-signature-reaction
+(def attr-signature-reaction
   "Reaction of the pull of a schema attribute, where any ref-attrs to something with any ident entity
   have been replaced by that ident keyword."
   (memoize
@@ -130,7 +130,7 @@
            (merge
              (get-in base-context [:dat.view/base-config representation-id])
              (when ident
-               (let [attr-sig @(attribute-signature-reaction app ident)]
+               (let [attr-sig @(attr-signature-reaction app ident)]
                  (merge
                    (get-in base-context [:dat.view/card-config (:db/cardinality attr-sig) representation-id])
                    (get-in base-context [:dat.view/value-type-config (:db/valueType attr-sig) representation-id])

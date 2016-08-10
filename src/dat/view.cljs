@@ -351,12 +351,14 @@
              (cond
                ;; Not sure if these :component assignments are the right ticket
                (and (keyword? attr-entry) (= attr-entry attr-ident))
-               ^{:component summary-view} '[*]
+               ;^{::component summary-view}
+               '[*]
                (and (map? attr-entry) (get attr-entry attr-ident))
                (get attr-entry attr-ident)
                :else false))
           pull-expr)
-    ^{:component summary-view} '[*]))
+    ;^{::component summary-view}
+    '[*]))
 
 ;; Summary needs to be handled somewhat more cleverly... Set up as a special function that returns the corresponding pull-expr component?
 
@@ -387,6 +389,41 @@
        :on-click (fn [] (swap! (::edit? context) not))])))
                         ;; Should be possible to specify the callback here so you could do the old behavior of routing to a form as well
                         ;(router/set-route! app {:handler :edit-entity :route-params {:db/id (:dat.sync.remote.db/id pull-data)}}))])))
+
+
+
+(defn get-remote-eid
+  [app eid]
+  @(pull-attr (:conn app) eid :dat.sync.remote.db/id))
+  ;(:dat.sync.remote.db/id (d/pull @(:conn app) [:dat.sync.remote.db/id] eid)))
+
+(defn delete-entity-handler*
+  [app eid]
+  (when (js/confirm "Delete entity?")
+    (log/info "Deleting entity:" eid)
+    (if-let [remote-eid (get-remote-eid app eid)]
+      (do
+        (log/debug "Deleting entity (remote-eid):" remote-eid)
+        (send-remote-event! app [:dat.sync.remote/tx [[:db.fn/retractEntity remote-eid]]]))
+      (log/error "Unable to find remote db id for entity" (d/pull @(:conn app) '[*] eid)))))
+
+(defn ^:dynamic delete-entity-handler
+  [app eid]
+  (delete-entity-handler* app eid))
+
+(representation/register-representation
+  ::delete-entity-control
+  (fn [app _ data]
+    (let [eid (if (map? data)
+                (:db/id data)
+                data)]
+      [re-com/md-icon-button
+       :md-icon-name "zmdi-delete"
+       :size :smaller
+       :tooltip "Delete entity"
+       ;; TODO Should be dispatching instead
+       :on-click (partial delete-entity-handler app eid)])))
+
 
 
 ;; TODO Need a way to figure out which controls are needed for a given component
@@ -549,7 +586,7 @@
           ;; TODO Insert collapse here
           ;; here we go on collapse
           collapse-attribute? (r/atom (::collapsed? context))
-          edit? (r/atom true)
+          edit? (r/atom nil)
           copy? (r/atom nil)
           copy (r/atom nil)]
       (fn [app [_ context] pull-data]
@@ -587,14 +624,14 @@
                                      ;; Part of clever trick to avoid having to rerender form when toggling
                                      (when-not @edit? {:display "none"}))}
                   [:h3 "Editing"]
-                  [represent app [::pull-form local-context] [pull-expr pull-data]]])
+                  [represent app [::pull-form local-context] pull-data]])
               (when-not (nil? @copy?)
                 [:div {:style (merge h-box-styles
                                      {:padding "15px"}
                                      ;; Part of clever trick to avoid having to rerender form when toggling
                                      (when-not @copy? {:display "none"}))}
                  [:h3 "Copying"]
-                 [represent app [::pull-form local-context] [pull-expr pull-data]]])])])))))
+                 [represent app [::pull-form local-context] pull-data]])])])))))
 
 
 ;; See definition below
@@ -920,16 +957,22 @@
          [boolean-selector app eid attr-ident value]
          ;; For numeric inputs, want to style a little differently
          [{:db/valueType (:or :db.type/float :db.type/double :db.type/integer :db.type/long)}]
-         [re-com/input-text
-          :model (str value)
-          :width "130px"
-          :on-change (make-change-handler app eid attr-ident value)]
+         (vec (concat [(if (::text-rows context) re-com/input-textarea re-com/input-text)
+                       :model (str value) ;; just to make sure...
+                       :style (::input-style context) ;; TODO Get input-style passed along through everywhere else
+                       :width (-> context ::input-style :width)
+                       :on-change (make-change-handler app eid attr-ident value)]
+                      (when-let [rows (::text-rows context)]
+                        [:rows rows])))
          ;; Misc; Simple input, but maybe do a dynamic type dispatch as well for customization...
          :else
-         [re-com/input-text
-          :model (str value) ;; just to make sure...
-          :width (if (= attr-ident :db/doc) "350px" "200px")
-          :on-change (make-change-handler app eid attr-ident value)])])))
+         (vec (concat [(if (::text-rows context) re-com/input-textarea re-com/input-text)
+                       :model (str value) ;; just to make sure...
+                       :style (::input-style context)
+                       :width (-> context ::input-style :width)
+                       :on-change (make-change-handler app eid attr-ident value)]
+                      (when-let [rows (::text-rows context)]
+                        [:rows rows]))))])))
 
 
 ;; TODO Need to have some way of wrapping or overriding this in certain cases; How do we make this part of more default controls orthogonal?
@@ -1124,22 +1167,6 @@
   (let [context (assoc context ::pull-expr pull-expr)]
     [represent app [::fields-for context] [eid attr-ident value]]))
 
-
-(defn get-remote-eid
-  [app eid]
-  (:datsync.remote.db/id (d/pull @(:conn app) [:datsync.remote.db/id] eid)))
-
-(defn delete-entity-handler
-  [app eid]
-  (when (js/confirm "Delete entity?")
-    (let [entity (d/pull @(:conn app) [:e/type :datsync.remote.db/id] eid)]
-      (js/console.log (str "Deleting entity: " eid))
-      (match [entity]
-        ;; may need the ability to dispatch in here;
-        :else
-        (send-tx! app [[:db.fn/retractEntity eid]])))))
-
-
 ;(defn pull-expression-context
 ;  [pull-expr]
 ;  ;; Have to get this to recursively pull out metadata from reference attributes, and nest it according to context schema XXX
@@ -1199,34 +1226,54 @@
 (declare type-pull)
 (declare entity-pull)
 
+;(defn pull-merge
+;  [pull1 pull2]
+;  (let [maps (filter map? pull1)]
+;    (concat pull1 pull2)))
+
+
+;; TODO Oy... this (and all it's uses) need to be totally rewritten; We can't pass through pull-expr, since we can't always know it a priori (if you have subtypes, you can't know which fields you should have till you know which type it is)
+;; Got too agressive on trying to optimize by minizing pull queries
+;; TODO Also need to pass down information here about what types are acceptable in the type selector field
 (representation/register-representation
   ::pull-form
   ;; TODO Hmm... because we would like pull-expr to supply context when context is nil, it would be nice to add this bit of logic as a context resolution extension
-  (fn [app [_ context] [pull-expr pull-data-or-id]]
+  (fn [app [_ context] pull-data-or-id]
     ;; Supplying nil to pull expr leaves it inferred via context, dat.view/entity-pull, and dat.view/base-pull, in that order
-    (let [pull-expr (deref-or-value (or pull-expr (::pull-expr context) @(entity-pull app pull-data-or-id) base-pull))
+    (let [
+          pull-expr (deref-or-value
+                      (or
+                        ;(when-let [type-ident (:db/ident (:e/type (deref-or-value pull-data-or-id)))]
+                        ;    (type-pull app type-ident)
+                          (entity-pull app pull-data-or-id)))
+                          ;pull-expr
+                          ;(::pull-expr context)
+                          ;;(entity-pull app pull-data-or-id)
+                          ;base-pull))
           pull-data-or-id (utils/deref-or-value pull-data-or-id)
           local-context (:dat.view.context/locals context)
           eid (cond
                 ;; id or lookup ref
                 ((some-fn integer? vector?) pull-data-or-id) pull-data-or-id
                 ;; presumably, data returned from said query
-                (map? pull-data-or-id) (:db/id pull-data-or-id))]
-      (cond
+                (map? pull-data-or-id) (:db/id pull-data-or-id))
+          pull-data @(safe-pull (:conn app) pull-expr eid)]
+      ;(cond
         ; again, id or lookup ref
-        ((some-fn integer? vector?) pull-data-or-id)
-        (let [pull-data (safe-pull (:conn app) pull-expr pull-data-or-id)]
-          [represent app [::pull-form local-context] [pull-expr pull-data]])
+        ;((some-fn integer? vector?) pull-data-or-id)
+        ;(let [pull-data (safe-pull (:conn app) pull-expr pull-data-or-id)]
+        ;  [represent app [::pull-form local-context] [pull-expr pull-data]])
         ; again, id or lookup ref
-        (map? pull-data-or-id)
-        [:div (:dom/attrs context)
-         ;(for [[attr-ident values] (pull-attr-values app pull-expr pull-data-or-id)]
-         (for [attr-ident (sort-by (comp deref (partial attr-order app))
-                                   (pull-attributes pull-expr pull-data-or-id))]
-           (let [values (get pull-data-or-id attr-ident)]
-             ^{:key (hash attr-ident)}
-             ;; Need to assoc in the attr-ident to context as well, so the correct context can be prepared for the child representation
-             [represent app [::fields-for (assoc local-context :db.attr/ident attr-ident)] [eid attr-ident values]]))]))))
+      [:div (:dom/attrs context)
+       (let [control-context (assoc local-context ::controls (::controls context))]
+         [represent app [::control-set control-context] pull-data])
+       ;(for [[attr-ident values] (pull-attr-values app pull-expr pull-data-or-id)]
+       (for [attr-ident (sort-by (comp deref (partial attr-order app))
+                                 (pull-attributes pull-expr pull-data))]
+         (let [values (get pull-data-or-id attr-ident)]
+           ^{:key (hash attr-ident)}
+           ;; Need to assoc in the attr-ident to context as well, so the correct context can be prepared for the child representation
+           [represent app [::fields-for (assoc local-context :db.attr/ident attr-ident)] [eid attr-ident values]]))])))
 
 (defn pull-form
   "Renders a form with defaults from pull data, or for an existing entity, subject to optional specification of a
@@ -1243,8 +1290,9 @@
      ;; Would be nice to move into rep though, as discussed there...
      (let [context (if (and pull-expr (not context))
                      (meta-context pull-expr)
-                     context)]
-       [represent app [::pull-form (or context {})] [pull-expr pull-data-or-id]]))))
+                     context)
+           context (assoc context ::pull-expr pull-expr)]
+       [represent app [::pull-form (or context {})] pull-data-or-id]))))
 
 (representation/register-representation
   ::edit-entity-form
@@ -1297,8 +1345,9 @@
         base-type))))
 
 
-;; XXX Note; recursive isComponent attribute relations break this
+;; XXX Note; cyclic recursive isComponent attribute relations break this
 ;; BIG TODO QUESTION Figure out how we deal with the different needs of base-pull between view and control contexts; Don't always want forms for things we might just pull along for ride on view, & vice versa
+;(def type-pull nil)
 (defonce type-pull
   (memoize
     (fn type-pull*
@@ -1311,13 +1360,14 @@
              (fn [data]
                (cond
                  ;; For types
-                 (:e.type/attributes data)
-                 (->> (:e.type/attributes data)
+                 (= (:db/ident (:e/type data)) :e.type/Type)
+                 (->> ;; Gather type attributes
+                      (:e.type/attributes data)
                       ;; Assoc in a virtual attribute about whether a ref or not
                       (map (fn [attr] (assoc attr :db.type/ref? (-> attr :db/valueType :db/ident #{:db.type/ref}))))
                       ;; Mocking in :db/id, :db/ident and :e/type, since want for everything
                       (concat [{:db/ident :db/id}
-                               ;; Should hide ident if not needed TODO
+                               ;; TODO Should hide ident if not needed
                                {:db/ident :db/ident}
                                {:db/ident :e/type
                                 :db.type/ref? true
@@ -1325,7 +1375,6 @@
                                                        :e.type/attributes [{:db/ident :db/id}
                                                                            {:db/ident :db/ident}]}]}])
                       (sort-by attr-entity-order)
-                      ;; TODO Take into account isa subtypes and super types
                       (map (fn [attr]
                              (if (:db.type/ref? attr)
                                (if (:db/isComponent attr)
@@ -1347,6 +1396,11 @@
                                       (with-meta {;::representation ::pull-summary-view
                                                   ::collapsed? true ::collapsable? true}))})
                                (:db/ident attr))))
+                      ;; Concat with supertype pull expressions
+                      (concat
+                        (when-let [supertypes (:e.type/isa data)]
+                          ;; supertypes have already been (postwalk) transformed to their respective pulls
+                          (apply concat supertypes)))
                       ;; Oh... shouldn't need this. This was probably because of the component refs?
                       (remove nil?)
                       distinct
@@ -1436,7 +1490,8 @@
    ::base-config
    {; don't need this if we have base-context
     ::pull-form
-    {:dom/attrs {:style bordered-box-style}}
+    {:dom/attrs {:style bordered-box-style}
+     ::controls [::delete-entity-control]}
     ::attr-values-view
     {:dom/attrs {:style h-box-styles}
      ;; Right now only cardinality many attributes are collapsable; Should be able to set any? Then set for cardinality many as a default? XXX
@@ -1456,7 +1511,7 @@
                                bordered-box-style
                                {:padding "8px 15px"
                                 :width "100%"})}
-     ::controls [::copy-entity-control ::edit-entity-control]}
+     ::controls [::copy-entity-control ::edit-entity-control ::delete-entity-control]}
     ;; XXX This should change shortly...
     ::pull-view-controls
     {:dom/attrs {:style (merge h-box-styles
@@ -1482,11 +1537,20 @@
    ;; Specifications merged in for any config with a certain cardinality
    ::card-config {:db.cardinality/many {::fields-for {::controls [::add-reference-button]}}}
    ;; Specifications merged in for any value type
-   ::value-type-config {}
+   ::value-type-config {:db.type/string {::input-for {::input-style {:width "200px"}}}
+                        :db.type/float {::input-for {::input-style {:width "130px"}}}
+                        :db.type/double {::input-for {::input-style {:width "130px"}}}
+                        :db.type/integer {::input-for {::input-style {:width "100px"}}}
+                        :db.type/long {::input-for {::input-style {:width "100px"}}}}
+   ;:width (if (= attr-ident :db/doc) "350px" "200px")
    ::attr-config {:db/id {::fields-for {:attribute/hidden? true
                                         :dom/attrs {:style {:display "none"}}}}
                   :db/ident {::fields-for {:attribute/hidden? true
-                                           :dom/attrs {:style {:display "none"}}}}}})
+                                           :dom/attrs {:style {:display "none"}}}}
+                  :comment/body {::input-for {::input-style {:width "500px"}
+                                              ::text-rows 10}}
+                  :db/doc {::input-for {::input-style {:width "500px"}
+                                        ::text-rows 10}}}})
    ;; Will add the ability to add mappings at the entity level; And perhaps specifically at the type level.
    ;; Use the patterns of OO/types with pure data; Dynamic
 

@@ -166,7 +166,6 @@
      :db/isComponent true
      :attribute/label "Comments"
      :attribute.ref/types [:e.type/Comment]
-     :e.type/_attributes :e.type/Comment
      :db.install/_attribute :db.part/db}]
    [{:db/id          #db/id[:db.part/db]
      :db/ident       :comment/body
@@ -174,7 +173,7 @@
      :db/cardinality :db.cardinality/one
      :db/fulltext    true
      :db/doc         "The text body of a comment"
-     :attribute/label "Abbreviation"
+     :attribute/label "Comment body"
      :e.type/_attributes :e.type/Comment
      :db.install/_attribute :db.part/db}
     {:db/id          #db/id[:db.part/db]

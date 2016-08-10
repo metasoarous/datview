@@ -60,6 +60,13 @@
      :db/valueType   :db.type/ref
      :db/cardinality :db.cardinality/many
      :db/doc         "For a reference attribute, what e.types are acceptable?"
+     :db.install/_attribute :db.part/db}
+    ;; Also going to make it possible to directly assign options for a ref attribute, in cases of enums (basically)
+    {:db/id          #db/id[:db.part/db]
+     :db/ident       :attribute.ref/options
+     :db/valueType   :db.type/ref
+     :db/cardinality :db.cardinality/many
+     :db/doc         "For a reference attribute, what explicit collection of entities should be selectable?"
      :db.install/_attribute :db.part/db}]
    ;; Some misc recursive installation
    [[:db/add :attribute.ref/types :attribute.ref/types :e.type/Type]

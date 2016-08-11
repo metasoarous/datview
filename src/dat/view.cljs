@@ -323,14 +323,17 @@
     (clojure.string/join " " (concat [(clojure.string/capitalize x)] xs))))
 
 
+(def label-styles
+  {:font-size "14px"
+   :font-weight "bold"})
+
 (representation/register-representation
   ::label-view
   (fn [app _ attr-ident]
     [:div
      (when attr-ident
        [re-com/label
-        :style {:font-size "14px"
-                :font-weight "bold"}
+        :style label-styles
         :label
         (or (:attribute/label @(safe-pull (:conn app) [:db/id :db/ident :attribute/label] [:db/ident attr-ident]))
             (lablify-attr-ident attr-ident))])]))
@@ -774,18 +777,19 @@
       ([app attr-ident]
        (ref-attr-options app attr-ident :db/id))
       ([app attr-ident sort-key]
-       (->>
-         (safe-q '[:find [(pull ?e [:db/id :db/ident * {:e/type [*]}]) ...]
-                   :in $ % ?attr
-                   :where [?attr :attribute.ref/types ?type]
-                          (type-instance ?type ?e)]
-                 (:conn app)
-                 query/rules
-                 [:db/ident attr-ident])
-         deref
-         (sort-by sort-key)
-         vec
-         reaction)))))
+       (reaction
+         (let [options
+               (or @(pull-attr (:conn app) [:db/ident attr-ident] :attribute.ref/options)
+                   @(safe-q '[:find [(pull ?e [:db/id :db/ident * {:e/type [*]}]) ...]
+                              :in $ % ?attr
+                              :where [?attr :attribute.ref/types ?type]
+                                     (type-instance ?type ?e)]
+                            (:conn app)
+                            query/rules
+                            [:db/ident attr-ident]))]
+           (->> options
+             (sort-by sort-key)
+             vec)))))))
 
 ;; TODO Need constext here for a better sort-by specification; switch to representation
 (defn select-entity-input
@@ -1157,15 +1161,14 @@
                              (and (sequential? value) (seq value))
                              (and value [value])
                              [nil]))]
-               ^{:key (hash {:component :field-for :eid eid :attr-ident attr-ident :value value})}
+               ^{:key (hash {:component :fields-for :eid eid :attr-ident attr-ident :value value})}
                [represent app [::input-for local-context] [eid attr-ident value]])]))))))
                ;[input-for app context-data pull-expr eid attr-ident value])]])))))))
 
 ;; TODO Need to rewrite with saner arity
-(defn field-for
-  [app context pull-expr eid attr-ident value]
-  (let [context (assoc context ::pull-expr pull-expr)]
-    [represent app [::fields-for context] [eid attr-ident value]]))
+(defn fields-for
+  [app context eid attr-ident value]
+  [represent app [::fields-for context] [eid attr-ident value]])
 
 ;(defn pull-expression-context
 ;  [pull-expr]
@@ -1240,17 +1243,16 @@
   ;; TODO Hmm... because we would like pull-expr to supply context when context is nil, it would be nice to add this bit of logic as a context resolution extension
   (fn [app [_ context] pull-data-or-id]
     ;; Supplying nil to pull expr leaves it inferred via context, dat.view/entity-pull, and dat.view/base-pull, in that order
-    (let [
-          pull-expr (deref-or-value
-                      (or
+    (let [pull-expr (deref-or-value
+                      ;(or
                         ;(when-let [type-ident (:db/ident (:e/type (deref-or-value pull-data-or-id)))]
                         ;    (type-pull app type-ident)
-                          (entity-pull app pull-data-or-id)))
+                          (entity-pull app pull-data-or-id))
                           ;pull-expr
                           ;(::pull-expr context)
                           ;;(entity-pull app pull-data-or-id)
                           ;base-pull))
-          pull-data-or-id (utils/deref-or-value pull-data-or-id)
+          pull-data-or-id (deref-or-value pull-data-or-id)
           local-context (:dat.view.context/locals context)
           eid (cond
                 ;; id or lookup ref
@@ -1289,7 +1291,7 @@
      ;; For now, we'll get around the todo item on ::pull-form relating to context from pull-expr by using this little piece of logic here.
      ;; Would be nice to move into rep though, as discussed there...
      (let [context (if (and pull-expr (not context))
-                     (meta-context pull-expr)
+                     (merge context (meta-context pull-expr))
                      context)
            context (assoc context ::pull-expr pull-expr)]
        [represent app [::pull-form (or context {})] pull-data-or-id]))))
@@ -1410,15 +1412,22 @@
                  :else data))
              type-data)))))))
 
-
+;(def entity-pull nil)
 (defonce entity-pull
   (memoize
-    (fn entity-pull*
+   (fn entity-pull*
       [app entity-or-eid]
       (cond
+        ;; If derefable, deref first
+        (implements? IDeref entity-or-eid)
+        (entity-pull* app @entity-or-eid)
         ;; If a map, use id to defer to else case  TODO could look here for type ids first...
         (map? entity-or-eid)
-        (entity-pull* app (:db/id entity-or-eid))
+        (if-let [type (:db/id (:e/type entity-or-eid))]
+          (do
+            (log/debug "The type is" type)
+            (type-pull app type))
+          (entity-pull* app (:db/id entity-or-eid)))
         ;; This is where all the real logic is:
         :else ;; assume eid
         (let [type-id-rx (pull-path (:conn app) entity-or-eid [:e/type :db/id])]

@@ -549,7 +549,7 @@
         (:db.type/ref? attr-data) 5
         :else 0)))
 
-(defonce attr-order
+(def attr-order
   (memoize
     (fn [app attr]
       (reaction
@@ -771,38 +771,48 @@
     (log/debug "label: " (:label x)))
   stuff)
 
-(defonce ref-attr-options
-  (memoize
+;; this is doing strange things with options when we memoize it, so leaving that out for now...
+;(def ref-attr-options nil)
+(def ref-attr-options
+  ;(memoize
     (fn
       ([app attr-ident]
-       (ref-attr-options app attr-ident :db/id))
+       (ref-attr-options app attr-ident nil))
       ([app attr-ident sort-key]
-       (reaction
-         (let [options
-               (or @(pull-attr (:conn app) [:db/ident attr-ident] :attribute.ref/options)
-                   @(safe-q '[:find [(pull ?e [:db/id :db/ident * {:e/type [*]}]) ...]
-                              :in $ % ?attr
-                              :where [?attr :attribute.ref/types ?type]
-                                     (type-instance ?type ?e)]
-                            (:conn app)
-                            query/rules
-                            [:db/ident attr-ident]))]
-           (->> options
-             (sort-by sort-key)
-             vec)))))))
+       (let [sort-key (or sort-key :db/id)]
+         (reaction
+           (log/debug "CALLING REF_ATTR_OPTIONS!!!" attr-ident)
+           ;@(utils/schema-reaction (:conn app))
+           (let [options
+                 (or (seq (:attribute.ref/options
+                            @(safe-pull
+                               (:conn app)
+                               '[{:attribute.ref/options [:db/id :db/ident * {:e/type [*]}]}]
+                               [:db/ident attr-ident])))
+                     @(safe-q '[:find [(pull ?e [:db/id :db/ident * {:e/type [*]}]) ...]
+                                :in $ % ?attr
+                                :where [?attr :attribute.ref/types ?type]
+                                       (type-instance ?type ?e)]
+                              (:conn app)
+                              query/rules
+                              [:db/ident attr-ident]))]
+             (->> options
+               (sort-by sort-key)
+               vec)))))))
 
 ;; TODO Need constext here for a better sort-by specification; switch to representation
 (defn select-entity-input
-  ([app eid attr-ident value]
+  ([app context eid attr-ident value]
     ;; XXX value arg should be safe as a reaction here
-   (let [options (ref-attr-options app attr-ident :label)]
-         ;; Should extract this as something memoized
-     ;; Remove this div; just for debug XXX
-     [select-entity-input app eid attr-ident value options]))
-  ([app eid attr-ident value options]
+   (let [options (deref-or-value
+                   (or (:dat.view/options context)
+                       (ref-attr-options app attr-ident (:dat.view.options/sort-by context))))]
+     [select-entity-input app context eid attr-ident value options]))
+  ([app context eid attr-ident value options]
    (let [value (utils/deref-or-value value)
-         value (or (:db/id value)
-                   (and (vector? value) @(pull-attr (:conn app) value :db/id))
+         id-fn (or (::id-fn context) :db/id)
+         value (or (id-fn value)
+                   (and (vector? value) @(pull-attr (:conn app) value id-fn))
                    value)]
      [re-com/single-dropdown
       :style {:min-width "150px"}
@@ -810,9 +820,9 @@
       :choices options
       ;; TODO Not sure if this will break things or not; have to test
       ;:model (:db/id value)
-      :id-fn :db/id
+      :id-fn id-fn
       ;; For now hard coding this... For some reason using the summary function here is messing everything up
-      :label-fn pull-summary-string
+      :label-fn (or (::label-fn context) pull-summary-string)
       :model value
       :on-change (partial apply-reference-change! app eid attr-ident value)])))
 
@@ -952,7 +962,7 @@
          ;; TODO Need to redo all the below as representations
          ;; Non component entity; Do dropdown select...
          [{:db/valueType :db.type/ref}]
-         [select-entity-input app eid attr-ident value]
+         [select-entity-input app context eid attr-ident value]
          ;; Need separate handling of datetimes
          [{:db/valueType :db.type/instant}]
          [datetime-selector app eid attr-ident value]
@@ -1332,7 +1342,7 @@
 ;; ## Constructing queries with metadata annotations
 
 
-(defonce type-data
+(def type-data
   ^{:arglist '([app base-type])}
   (memoize
     (fn [app base-type]
@@ -1350,7 +1360,7 @@
 ;; XXX Note; cyclic recursive isComponent attribute relations break this
 ;; BIG TODO QUESTION Figure out how we deal with the different needs of base-pull between view and control contexts; Don't always want forms for things we might just pull along for ride on view, & vice versa
 ;(def type-pull nil)
-(defonce type-pull
+(def type-pull
   (memoize
     (fn type-pull*
       ([app base-type]
@@ -1413,7 +1423,7 @@
              type-data)))))))
 
 ;(def entity-pull nil)
-(defonce entity-pull
+(def entity-pull
   (memoize
    (fn entity-pull*
       [app entity-or-eid]

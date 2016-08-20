@@ -40,96 +40,42 @@
   [worker-count worker-script servant-channel]
   component/Lifecycle
   (start [component]
-    (let [servant-channel (or servant-channel)]
-      (servant/spawn-servants worker-count worker-script)))
+    (log/info ">> Starting ServantManager")
+    (let [servant-channel (or servant-channel (servant/spawn-servants worker-count worker-script))]
+      (assoc component :servant-channel servant-channel)))
   (stop [component]
-    ;; Here you have the ability to specify how many workers to kill off.
-    (println "Killing webworkers")
-    (servant/kill-servants servant-channel worker-count)))
+    ;; Here you have the ability to specify how many servants to kill off.
+    (log/info "<< Stopping ServantManager")
+    (servant/kill-servants servant-channel worker-count)
+    (assoc component :servant-channel nil)))
 
 
-(def default-pull-options {:dat.sub/cache? false})
-
-(defn servant-reaction
-  [app cache servant-f args options]
-  (let [;conn (:conn app) ;; need to think about how to treat conn separately
-        servant-channel (-> app :servant :servant-channel)
-        options (merge default-pull-options
-                       options)
-        answer-atom (if (:dat.sub/cache? options)
-                      (if-let [cached-ans (get @cache args)]
-                        cached-ans
-                        (let [new-ans (r/atom (:dat.sub/default options))]
-                          (swap! cache assoc args new-ans)
-                          new-ans))
-                      (r/atom (:dat.sub/default options)))]
-    (reaction
-      (let [;db @conn ;; TODO This is where we need to add posh filters when appropriate
-            args (map utils/deref-or-value args)
-            result-channel (apply servant/servant-thread servant-channel servant/standard-message servant-f args)]
-        (go
-          (let [ans (<! result-channel)]
-            (reset! answer-atom ans))))
-      @answer-atom)))
-
-(defservantfn servant-pull
-  [db pull-expr id]
-  (d/pull db pull-expr id))
-
-
-(def pull
-  (let [cache (atom {})]
-    (memoize
-      (fn
-        ([app pull-expr eid options]
-         (servant-reaction app cache servant-pull [(:conn app) pull-expr eid] options))
-        ([app pull-expr eid]
-         (pull app pull-expr eid {}))))))
-
-(defservantfn servant-q
-  [query args]
-  (apply d/q query args))
-
-(def q
-  (let [cache (atom {})]
-    (memoize
-      (fn [query & args]
-        (let [query-arity (if-let)]
-          (servant-reaction app cache servant-q [query args] options))))))
-
-(def pull
-  (let [cache (atom {})]
-    (memoize
-      (fn
-        ([app pull-expr eid options]
-         (let [conn (:conn app)
-               servant-channel (-> app :servant :servant-channel)
-               options (merge default-pull-options
-                              options)
-               cache-key [conn pull-expr eid]
-               answer-atom (if (:dat.sub/cache? options)
-                             (if-let [cached-ans (get @cache cache-key)]
-                               cached-ans
-                               (let [new-ans (r/atom (:dat.sub/default options))]
-                                 (swap! cache assoc cache-key new-ans)
-                                 new-ans))
-                             (r/atom (:dat.sub/default options)))]
-           (reaction
-             (let [db @conn ;; TODO This is where we need to add posh filters when appropriate
-                   result-channel (servant/servant-thread servant-channel servant/standard-message servant-pull db pull-expr eid)]
-               (go
-                 (let [ans (<! result-channel)]
-                   (reset! answer-atom ans))))
-             @answer-atom)))
-        ;; Should use posh's pattern matching when appropriate
-        ([conn pull-expr eid]
-         (pull conn pull-expr eid {}))))))
-
+;(defn servant-reaction
+;  [app cache servant-f args options]
+;  (let [;conn (:conn app) ;; need to think about how to treat conn separately
+;        servant-channel (-> app :servant :servant-channel)
+;        options (merge default-pull-options
+;                       options)
+;        answer-atom (if (:dat.sub/cache? options)
+;                      (if-let [cached-ans (get @cache args)]
+;                        cached-ans
+;                        (let [new-ans (r/atom (:dat.sub/default options))]
+;                          (swap! cache assoc args new-ans)
+;                          new-ans))
+;                      (r/atom (:dat.sub/default options)))]
+;    (reaction
+;      (let [;db @conn ;; TODO This is where we need to add posh filters when appropriate
+;            args (map utils/deref-or-value args)
+;            result-channel (apply servant/servant-thread servant-channel servant/standard-message servant-f args)]
+;        (go
+;          (let [ans (<! result-channel)]
+;            (reset! answer-atom ans))))
+;      @answer-atom)))
 
 (def default-servant-options
   {:worker-count 4
    ;; I think this is right...
-   :worker-script "js/app.js"})
+   :worker-script "js/servant.js"})
 
 (defn new-servant-manager
   ([options]
@@ -137,28 +83,32 @@
                           default-servant-options
                           options)))
   ([]
-   (recur {})))
-
-(defn query-manager
-  [])
+   (new-servant-manager {})))
 
 
+(defservantfn dostuff
+  [x y]
+  (* x y))
 
-(defrecord DatSubManager
-  [servant subscriptions])
+
+(defn dostuff-reaction
+  [servant-manager x y]
+  (let [a (r/atom nil)]
+    (log/debug "Making a dostuff-reaction with x y:" x y)
+    (log/debug "Servant channel" (:servant-channel servant-manager))
+    (let [result-chan (servant/servant-thread (:servant-channel servant-manager) servant/standard-message dostuff x y)]
+      (log/debug "Servant thread created!")
+      (go (let [result (<! result-chan)]
+            (log/debug "New dostruff-reaction result:" result)
+            (reset! a result))))
+    a))
 
 
-(defn pull*
-  [conn pull-expr eid])
 
-(defservantfn pull
-  ([conn pull-expr eid
-    (pull conn pull-expr eid {})])
-  ([conn pull-expr eid options]
-   (reaction
-     ())))
-     ;; Ideas for options
-     ;(if (::stay-alive options)))))
+(defn remote-subscription
+  [remote-event]
+  (let []))
+
 
 
 

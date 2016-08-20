@@ -4,7 +4,8 @@
     [datascript.core :as d]
     [reagent.core :as r]
     [reagent.ratom :as ratom :refer-macros [reaction]]
-    [posh.reagent :as posh]))
+    [posh.reagent :as posh]
+    [taoensso.timbre :as log]))
 
 ;(defn deref-or-value
 ;  [val-or-atom]
@@ -42,17 +43,29 @@
 
 
    ;; If we build/mock a reaction macro for clj, we could build these out for both
-(defn as-reaction
-  "Treat a regular atom as though it were a reaction"
-  [vanilla-atom]
-  (let [trigger (ratom 0)]
-    (add-watch vanilla-atom :as-reaction-trigger (fn [& _] (swap! trigger inc)))
-    (reaction
-      @trigger
-      @vanilla-atom)))
+;; is it bad to memoize this? Would rather use a dispenser...
+(def as-reaction
+  "Treat a regular atom as though it were a reaction; Be careful, memoizes (we might end up using a dispensor trick
+  like posh does to avoid this, but that limits us to using conns; can't get listeners/watches with regular atoms...)"
+  (memoize
+    (fn
+      [vanilla-atom]
+      (let [trigger (ratom 0)]
+        (add-watch vanilla-atom :as-reaction-trigger (fn [& _] (swap! trigger inc)))
+        (reaction
+          @trigger
+          @vanilla-atom)))))
 
 
 ;; XXX This will be coming to posh soon, but in case we need it earlier
+
+(def schema-reaction
+  (memoize
+    (fn [conn]
+      (let [conn-reaction (as-reaction conn)]
+        (reaction
+          (:schema @conn-reaction))))))
+
 
 (def safe-pull
   "A version of posh/pull where missing lookup refs should behave properly (generally), but also behave more like Datomic than
@@ -60,22 +73,22 @@
   ;(memoize
   (fn safe-pull*
     [conn pattern eid-or-lookup]
-    ;(log/debug "eid-or-lookup" eid-or-lookup)
-    (cond
-      ;; If integer
-      (integer? eid-or-lookup)
-      (posh/pull conn pattern eid-or-lookup)
-      ;; Make sure not nil...
-      (nil? eid-or-lookup)
-      (reaction {:db/id nil})
-      ;; TODO Hmm... should we be testing here to make sure this is unique and actually a lookup ref
-      (vector? eid-or-lookup)
-      (let [eid-rx (posh/q [:find '?e '. :where (into '[?e] eid-or-lookup)] conn)]
-        (reaction
-          (let [eid @eid-rx]
-            (if (integer? eid)
-              @(posh/pull conn pattern eid)
-              {:db/id nil})))))))
+    ;(log/debug( "eid-or-lookup" eid-or-lookup)
+    (reaction
+      ;@(schema-reaction conn) ;; This should get these things updating if we get schema changes
+      (cond
+        ;; If integer
+        (integer? eid-or-lookup)
+        @(posh/pull conn pattern eid-or-lookup)
+        ;; Make sure not nil...
+        (nil? eid-or-lookup)
+        {:db/id nil}
+        ;; TODO Hmm... should we be testing here to make sure this is unique and actually a lookup ref
+        (vector? eid-or-lookup)
+        (let [eid @(posh/q [:find '?e '. :where (into '[?e] eid-or-lookup)] conn)]
+          (if (integer? eid)
+            @(posh/pull conn pattern eid)
+            {:db/id nil}))))))
 
 (def safe-q
   "A version of posh/q without any transaction pattern matching filters (al a posh) that delegates directly to d/q, and

@@ -26,23 +26,8 @@
 
 (def ratom r/atom)
 
-;#?(:clj
-;   (defmacro fake-reaction
-;     [& forms]
-;     `()))
 
-
-(defn persistent-reaction
-  [rx-fn]
-  (let [last-value (atom nil)]
-    (ratom/make-reaction
-      (fn [& args]
-        (let [result (apply rx-fn args)]
-          (reset! last-value result)
-          result)))))
-
-
-   ;; If we build/mock a reaction macro for clj, we could build these out for both
+;; If we build/mock a reaction macro for clj, we could build these out for both
 ;; is it bad to memoize this? Would rather use a dispenser...
 (def as-reaction
   "Treat a regular atom as though it were a reaction; Be careful, memoizes (we might end up using a dispensor trick
@@ -59,32 +44,23 @@
 
 ;; XXX This will be coming to posh soon, but in case we need it earlier
 
-(def schema-reaction
-  (memoize
-    (fn [conn]
-      (let [conn-reaction (as-reaction conn)]
-        (reaction
-          (:schema @conn-reaction))))))
-
-
 (def safe-pull
   "A version of posh/pull where missing lookup refs should behave properly (generally), but also behave more like Datomic than
-  DataScript by returning `{:db/id nill}` instead of erroring when passed bad lookup refs."
+  DataScript by returning `{:db/id nil}` instead of erroring when passed bad lookup refs."
   ;(memoize
   (fn safe-pull*
-    [conn pattern eid-or-lookup]
+    [conn pattern eid-or-lookup & [options]]
     ;(log/debug( "eid-or-lookup" eid-or-lookup)
-    (reaction
-      ;@(schema-reaction conn) ;; This should get these things updating if we get schema changes
-      (cond
-        ;; If integer
-        (integer? eid-or-lookup)
-        @(posh/pull conn pattern eid-or-lookup)
-        ;; Make sure not nil...
-        (nil? eid-or-lookup)
-        {:db/id nil}
-        ;; TODO Hmm... should we be testing here to make sure this is unique and actually a lookup ref
-        (vector? eid-or-lookup)
+    (cond
+      ;; If integer
+      (integer? eid-or-lookup)
+      (posh/pull conn pattern eid-or-lookup options)
+      ;; Make sure not nil...
+      (nil? eid-or-lookup)
+      (reaction {:db/id nil})
+      ;; TODO Hmm... should we be testing here to make sure this is unique and actually a lookup ref
+      (vector? eid-or-lookup)
+      (reaction
         (let [eid @(posh/q [:find '?e '. :where (into '[?e] eid-or-lookup)] conn)]
           (if (integer? eid)
             @(posh/pull conn pattern eid)
@@ -93,6 +69,7 @@
 (def safe-q
   "A version of posh/q without any transaction pattern matching filters (al a posh) that delegates directly to d/q, and
   wraps in a reaction"
+  ;posh/q
   (memoize
     (fn [query conn & args]
       (reaction
@@ -111,19 +88,25 @@
 (def pull-attr
   "Wraps safe pull, and etracts the results for a given attr"
   (memoize
-    (fn [conn eid attr-ident]
-      (reaction
-        (get @(safe-pull conn [attr-ident] eid) attr-ident)))))
+    (fn
+      ([conn eid attr-ident options]
+       (reaction
+         (get @(safe-pull conn [attr-ident] eid options) attr-ident)))
+      ([conn eid attr-ident]
+       (pull-attr conn eid attr-ident {})))))
 
 
 (def pull-path
-  ;(memoize
-  (fn [conn eid attr-path]
-    ;; Question: Should use cursor?
-    (reaction
-      (get-in
-        @(safe-pull conn (vec (filter keyword? attr-path)) eid)
-        attr-path))))
+  (memoize
+    (fn
+      ([conn eid attr-path options]
+       ;; Question: Should use cursor?
+       (reaction
+         (get-in
+           @(safe-pull conn (vec (filter keyword? attr-path)) eid options)
+           attr-path)))
+      ([conn eid attr-path]
+       (pull-path conn eid attr-path {})))))
 
 
 

@@ -33,7 +33,7 @@
       (reaction
         (try
           (:dat.view.base-context/value
-            @(utils/safe-pull (:conn app) '[*] [:db/ident :dat.view/base-context]))
+            @(utils/safe-pull (:conn app) '[*] [:db/ident :dat.view/base-context] {:cache :forever}))
           ;; Easter egg:
           ;; A self installing config entity :-) Good pattern?
           (catch :default e
@@ -73,6 +73,8 @@
 
 ;; ### Attribute metadata reactions
 
+;; Hmmm... not sure why these are in context. These should probably be in subscriptions or queries or something.
+
 (def attribute-schema-reaction
   "Returns the corresponding attr-ident entry from the Datomic schema. Returns full entity ref-attr; Have to path for idents."
   (memoize
@@ -83,8 +85,18 @@
                          '[* {:db/valueType [:db/ident]
                               :db/cardinality [:db/ident]
                               :db/unique [:db/ident]
-                              :attribute.ref/types [:db/ident]}]
-                         [:db/ident attr-ident])))))
+                              :attribute.ref/types [:db/ident]
+                              :attribute/sort-by [:db/ident]}]
+                         [:db/ident attr-ident]
+                         {:cache :forever})))))
+        ;(reaction
+        ;  (log/debug "Having to recompute schema reaction")
+        ;  @(utils/safe-pull (:conn app)
+        ;                    '[* {:db/valueType [:db/ident]
+        ;                         :db/cardinality [:db/ident]
+        ;                         :db/unique [:db/ident]
+        ;                         :attribute.ref/types [:db/ident]}]
+        ;                    [:db/ident attr-ident])))))
 
 ;; Another function gives us a version of this that maps properly to idents
 (def attr-signature-reaction
@@ -141,4 +153,5 @@
              {::locals local-context}))
          (catch :default e
            (log/error e "Unable to build component context for local-context:" local-context "representation-id" representation-id)))))))
+
 

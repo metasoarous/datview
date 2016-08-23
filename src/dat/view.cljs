@@ -302,7 +302,7 @@
                               ;:align :end})}
                               ;:gap "20px"
          ;[debug "collapse-vals: " values]
-         (for [value (distinct values)]
+         (for [value values]
            ^{:key (hash value)}
            [represent app [::pull-summary-view local-context] value])]))))
 
@@ -335,7 +335,8 @@
        [re-com/label
         :style label-styles
         :label
-        (or (:attribute/label @(safe-pull (:conn app) [:db/id :db/ident :attribute/label] [:db/ident attr-ident]))
+        (or (when (= attr-ident :db/id) "DB ID")
+            (:attribute/label @(safe-pull (:conn app) [:db/id :db/ident :attribute/label] [:db/ident attr-ident]))
             (lablify-attr-ident attr-ident))])]))
 
 (defn label-view
@@ -513,14 +514,28 @@
 ;  [app context attr-ident values])
 
 
+;; Can add matches to this to get different attr-idents to match differently; Sould do multimethod?
+;; Cardinality many ref attributes should have an :attribute.ref/order-by attribute, and maybe a desc option
+;; as well
+(defn sorted-values
+  [app attr-ident values]
+  (if-let [sort-by-attr (:attribute/sort-by @(attr-signature-reaction app attr-ident))]
+    (do
+      (log/debug "Sorting" attr-ident "by" sort-by-attr)
+      (sort-by sort-by-attr values))
+    values))
+
+
 ;; Need to have controls etc here
 (representation/register-representation
   ::attr-view
+  ;; XXX Should be passing through [e :attr-ident values] just like in forms
   (fn [app [_ context] values]
     (let [attr-ident (:db.attr/ident context)
           attr-signature @(attr-signature-reaction app attr-ident)
           local-context (:dat.view.context/locals context)
-          child-context (merge local-context (get-in local-context [::ref-attrs attr-ident]))]
+          child-context (merge local-context (get-in local-context [::ref-attrs attr-ident]))
+          values (sorted-values app attr-ident values)]
       [:div (:dom/attrs context)
        [:div {:style (merge dat.view/v-box-styles)}
         [represent app [::label-view (assoc child-context ::attr-signature attr-signature)] attr-ident]
@@ -680,29 +695,6 @@
 ;; Should use :attribute/sort-by; default :db/id?
 
 
-(defn attr-sort-by
-  [app attr-ident]
-  (reaction (or (:db/ident (:attribute/sort-by @(safe-pull (:conn app) '[:db/ident] [:db/ident attr-ident])))
-                ;; Should add smarter option for :e/order as a generic? Or is this just bad semantics?
-                :db/id)))
-
-(defn value-type
-  [app attr-ident]
-  (reaction (:db/valueType @(safe-pull (:conn app) '[*] [:db/ident attr-ident]))))
-
-(defn reference?
-  [app attr-ident values]
-  (reaction (= (value-type app attr-ident) :db.type/ref)))
-
-;; Can add matches to this to get different attr-idents to match differently; Sould do multimethod?
-;; Cardinality many ref attributes should have an :attribute.ref/order-by attribute, and maybe a desc option
-;; as well
-(defn sorted-values
-  [app attr-ident values]
-  (reaction (if @(reference? app attr-ident values)
-              (sort-by @(attr-sort-by app attr-ident) values)
-              (sort values))))
-
 
 
 
@@ -774,31 +766,34 @@
 ;; this is doing strange things with options when we memoize it, so leaving that out for now...
 ;(def ref-attr-options nil)
 (def ref-attr-options
-  ;(memoize
+  (memoize
     (fn
       ([app attr-ident]
        (ref-attr-options app attr-ident nil))
       ([app attr-ident sort-key]
+       (ref-attr-options app attr-ident sort-key {}))
+      ([app attr-ident sort-key options]
        (let [sort-key (or sort-key :db/id)]
          (reaction
            (log/debug "CALLING REF_ATTR_OPTIONS!!!" attr-ident)
-           ;@(utils/schema-reaction (:conn app))
            (let [options
                  (or (seq (:attribute.ref/options
                             @(safe-pull
                                (:conn app)
                                '[{:attribute.ref/options [:db/id :db/ident * {:e/type [*]}]}]
-                               [:db/ident attr-ident])))
+                               [:db/ident attr-ident]
+                               options)))
                      @(safe-q '[:find [(pull ?e [:db/id :db/ident * {:e/type [*]}]) ...]
                                 :in $ % ?attr
                                 :where [?attr :attribute.ref/types ?type]
                                        (type-instance ?type ?e)]
                               (:conn app)
                               query/rules
-                              [:db/ident attr-ident]))]
+                              [:db/ident attr-ident]
+                              options))]
              (->> options
                (sort-by sort-key)
-               vec)))))))
+               vec))))))))
 
 ;; TODO Need constext here for a better sort-by specification; switch to representation
 (defn select-entity-input
@@ -1153,7 +1148,7 @@
       (fn [app [_ context] [eid attr-ident value]]
         (let [pull-expr (::pull-expr context)
               conn (:conn app)
-              eid (:db/id @(safe-pull conn '[*] eid))
+              ;eid (d/entid (:conn app) eid)
               value (or value (get @(safe-pull conn [attr-ident] eid) attr-ident))
               local-context (:dat.view.context/locals context)]
           ;; Ug... can't get around having to duplicate :field and label-view
@@ -1166,11 +1161,13 @@
               [label-view app attr-ident]
               (let [control-context (assoc local-context ::controls (::controls context))]
                 [represent app [::control-set control-context] [eid attr-ident value]])]
+             [frisk/FriskInline value]
              (for [value (let [value (utils/deref-or-value value)]
-                           (or
-                             (and (sequential? value) (seq value))
-                             (and value [value])
-                             [nil]))]
+                           (sorted-values app attr-ident
+                               (or
+                                 (when (sequential? value) (seq value))
+                                 (when value [value])
+                                 [nil])))]
                ^{:key (hash {:component :fields-for :eid eid :attr-ident attr-ident :value value})}
                [represent app [::input-for local-context] [eid attr-ident value]])]))))))
                ;[input-for app context-data pull-expr eid attr-ident value])]])))))))
@@ -1354,7 +1351,8 @@
            :e.type/attributes ...
            :db/valueType ...
            :attribute.ref/types ...}]
-        base-type))))
+        base-type
+        {:cache :forever}))))
 
 
 ;; XXX Note; cyclic recursive isComponent attribute relations break this

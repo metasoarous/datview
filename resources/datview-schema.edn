@@ -31,6 +31,12 @@
      :db/valueType   :db.type/boolean
      :db/cardinality :db.cardinality/one
      :db/doc         "Should this attribute be hidden in views and forms?"
+     :db.install/_attribute :db.part/db}
+    {:db/id          #db/id[:db.part/db]
+     :db/ident       :attribute/sort-by
+     :db/valueType   :db.type/ref
+     :db/cardinality :db.cardinality/one
+     :db/doc         "For reference attributes, the attribute by which results should be sorted"
      :db.install/_attribute :db.part/db}]
    ;;
    ;;
@@ -152,6 +158,7 @@
      :db/ident       :dat.view.creation/token
      :db/valueType   :db.type/uuid
      :db/cardinality :db.cardinality/one
+     :db/unique      :db.unique/identity
      :db/doc         "A remote token used for referencing new entities created on clients (should this be datsync really? What are the semantics of this thing?)"
      :attribute/label "Datview creation token"
      :attribute/hidden? true

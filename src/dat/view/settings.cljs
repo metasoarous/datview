@@ -4,8 +4,8 @@
             [reagent.ratom :refer-macros [reaction]]
             [dat.reactor :as reactor]
             [dat.reactor.dispatcher :as dispatcher]
+            [taoensso.timbre :as log]
             [posh.reagent :as posh]))
-
 
 
 ;; Should really split these up...
@@ -32,43 +32,19 @@
     (let [tx [{:db/ident :dat.view/settings setting-ident setting-value}]]
       (reactor/resolve-to app db [[:dat.reactor/local-tx tx]]))))
 
-
-;; The old implementation; TODO Remove...
-;(defn update-setting
-;  [conn attr-ident new-value]
-;  (let [settings-id @(posh/q '[:find ?settings . :where [?settings :db/ident :client/settings]] conn)]
-;    (d/transact! conn [{:db/id settings-id attr-ident new-value}])))
-
 (defn update-setting
   [app setting new-value]
+  (log/debug "update-setting called with" setting new-value)
   (dispatcher/dispatch! (:dispatcher app) [::update [setting new-value]]))
-
-;; ohh... should have update-settings for bulk single transaction update as well...
-
-(def safe-pull
-  (memoize
-    (fn safe-pull*
-      ([conn pull-expr id default]
-       (reaction
-         (try
-           @(posh/pull conn pull-expr default)
-           (catch :default e
-             (try @(dat.view/as-reaction conn) (catch :default e))
-             default))))
-      ([conn pull-expr id]
-       (safe-pull* conn pull-expr id nil)))))
 
 (defn get-setting
   ([app setting-ident]
-   (posh/q [:find '?x '. :where ['?settings :db/ident :dat.view/settings] ['?settings setting-ident '?x]] (:conn app)))
+   (reaction
+     (get
+       @(get-setting app)
+       setting-ident)))
   ([app]
-   (safe-pull (:conn app) '[*] [:db/ident :dat.view/settings])))
-
-;; TODO Remove
-;(defn get-settings
-;  "Returns a posh reactive query for the settings entity"
-;  [conn]
-;  (posh/q '[:find (pull ?settings [*]) . :where [?settings :db/ident :client/settings]] (:conn app)))
+   (posh/pull (:conn app) '[*] [:db/ident :dat.view/settings])))
 
 ;; TODO Buid out stuff for syncing settings objects for users
 

@@ -33,7 +33,7 @@
       (reaction
         (try
           (:dat.view.base-context/value
-            @(utils/safe-pull (:conn app) '[*] [:db/ident :dat.view/base-context] {:cache :forever}))
+            @(posh/pull (:conn app) '[*] [:db/ident :dat.view/base-context] {:cache :forever}))
           ;; Easter egg:
           ;; A self installing config entity :-) Good pattern?
           (catch :default e
@@ -81,22 +81,22 @@
     (fn [app attr-ident]
       (if (= attr-ident :db/id)
         (reaction {:db/id nil})
-        (utils/safe-pull (:conn app)
-                         '[* {:db/valueType [:db/ident]
-                              :db/cardinality [:db/ident]
-                              :db/unique [:db/ident]
-                              :attribute.ref/types [:db/ident]
-                              :attribute/sort-by [:db/ident]}]
-                         [:db/ident attr-ident]
-                         {:cache :forever})))))
+        (posh/pull (:conn app)
+                   '[* {:db/valueType [:db/ident]
+                        :db/cardinality [:db/ident]
+                        :db/unique [:db/ident]
+                        :attribute.ref/types [:db/ident]
+                        :attribute/sort-by [:db/ident]}]
+                   [:db/ident attr-ident]
+                   {:cache :forever})))))
         ;(reaction
         ;  (log/debug "Having to recompute schema reaction")
-        ;  @(utils/safe-pull (:conn app)
-        ;                    '[* {:db/valueType [:db/ident]
-        ;                         :db/cardinality [:db/ident]
-        ;                         :db/unique [:db/ident]
-        ;                         :attribute.ref/types [:db/ident]}]
-        ;                    [:db/ident attr-ident])))))
+        ;  @(posh/pull (:conn app)
+        ;              '[* {:db/valueType [:db/ident]
+        ;                   :db/cardinality [:db/ident]
+        ;                   :db/unique [:db/ident]
+        ;                   :attribute.ref/types [:db/ident]}]
+        ;              [:db/ident attr-ident])))))
 
 ;; Another function gives us a version of this that maps properly to idents
 (def attr-signature-reaction

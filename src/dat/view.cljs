@@ -189,7 +189,6 @@
 (def deref-or-value utils/deref-or-value)
 (def deep-merge utils/deep-merge)
 (def as-reaction utils/as-reaction)
-(def safe-pull utils/safe-pull)
 (def safe-q utils/safe-q)
 (def pull-many utils/pull-many)
 (def pull-attr utils/pull-attr)
@@ -336,7 +335,7 @@
         :style label-styles
         :label
         (or (when (= attr-ident :db/id) "DB ID")
-            (:attribute/label @(safe-pull (:conn app) [:db/id :db/ident :attribute/label] [:db/ident attr-ident]))
+            (:attribute/label @(posh/pull (:conn app) [:db/id :db/ident :attribute/label] [:db/ident attr-ident]))
             (lablify-attr-ident attr-ident))])]))
 
 (defn label-view
@@ -661,7 +660,7 @@
   (fn [app [_ context] [pull-expr eid]]
     ;; QUESTION Should this pull-expr computation be a function for reuse?
     (let [pull-expr (or pull-expr (::pull-expr context) @(entity-pull app eid) base-pull)
-          pull-data (safe-pull (:conn app) pull-expr eid)
+          pull-data (posh/pull (:conn app) pull-expr eid)
           child-context (-> (:dat.view.context/locals context)
                             ;; !!! Extract and merge the metadata context from the pull expression
                             (merge (meta-context pull-expr))
@@ -772,7 +771,7 @@
            (log/debug "CALLING REF_ATTR_OPTIONS!!!" attr-ident "with posh options" posh-options)
            (let [options
                  (or (seq (:attribute.ref/options
-                            @(safe-pull
+                            @(posh/pull
                                (:conn app)
                                '[{:attribute.ref/options [:db/id :db/ident * {:e/type [*]}]}]
                                [:db/ident attr-ident]
@@ -1154,7 +1153,7 @@
         (let [pull-expr (::pull-expr context)
               conn (:conn app)
               ;eid (d/entid (:conn app) eid)
-              value (or value (get @(safe-pull conn [attr-ident] eid) attr-ident))
+              value (or value (get @(posh/pull conn [attr-ident] eid) attr-ident))
               local-context (:dat.view.context/locals context)]
           ;; Ug... can't get around having to duplicate :field and label-view
           (when (and eid
@@ -1270,11 +1269,11 @@
                 ((some-fn integer? vector?) pull-data-or-id) pull-data-or-id
                 ;; presumably, data returned from said query
                 (map? pull-data-or-id) (:db/id pull-data-or-id))
-          pull-data @(safe-pull (:conn app) pull-expr eid)]
+          pull-data @(posh/pull (:conn app) pull-expr eid)]
       ;(cond
         ; again, id or lookup ref
         ;((some-fn integer? vector?) pull-data-or-id)
-        ;(let [pull-data (safe-pull (:conn app) pull-expr pull-data-or-id)]
+        ;(let [pull-data (posh/pull (:conn app) pull-expr pull-data-or-id)]
         ;  [represent app [::pull-form local-context] [pull-expr pull-data]])
         ; again, id or lookup ref
       [:div (:dom/attrs context)
@@ -1313,7 +1312,7 @@
     (if-let [eid @(pull-attr (:conn app) eid :db/id)]
       [:div v-box-styles
        ;; QUESTION TODO How do we add from our ::pull-summary-attributes to base-pull here? Do we need another option? Use type?
-       [:h3 "Editing entity"]; [pull-summary-string @(safe-pull (:conn app) base-pull eid)]] ; QUESTION why doesn't this work?
+       [:h3 "Editing entity"]; [pull-summary-string @(posh/pull (:conn app) base-pull eid)]] ; QUESTION why doesn't this work?
        [pull-form app context nil eid]
        (when (:dat.view.edit/preview context)
          [:div v-box-styles
@@ -1331,7 +1330,7 @@
 
 ;(defn pull-data-form
 ;  [app pull-expr eid]
-;  (if-let [current-data @(safe-pull (:conn app) pull-expr eid)]
+;  (if-let [current-data @(posh/pull (:conn app) pull-expr eid)]
 ;    [re-com/v-box :children [[pull-form app pull-expr eid]]]
 ;    [loading-notification "Please wait; loading data."]))
 
@@ -1347,7 +1346,7 @@
   ^{:arglist '([app base-type])}
   (memoize
     (fn [app base-type]
-      (safe-pull
+      (posh/pull
         (:conn app)
         '[:db/id :db/ident :db/isComponent
           {:e/type ...

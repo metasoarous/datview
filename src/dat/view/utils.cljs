@@ -44,29 +44,6 @@
 
 ;; XXX This will be coming to posh soon, but in case we need it earlier
 
-(def safe-pull
-  "A version of posh/pull where missing lookup refs should behave properly (generally), but also behave more like Datomic than
-  DataScript by returning `{:db/id nil}` instead of erroring when passed bad lookup refs."
-  ;(memoize
-  posh/pull)
-  ;(fn safe-pull*
-  ;  [conn pattern eid-or-lookup & [options]]
-  ;  ;(log/debug( "eid-or-lookup" eid-or-lookup)
-  ;  (cond
-  ;    ;; If integer
-  ;    (integer? eid-or-lookup)
-  ;    (posh/pull conn pattern eid-or-lookup options)
-  ;    ;; Make sure not nil...
-  ;    (nil? eid-or-lookup)
-  ;    (reaction {:db/id nil})
-  ;    ;; TODO Hmm... should we be testing here to make sure this is unique and actually a lookup ref
-  ;    (vector? eid-or-lookup)
-  ;    (reaction
-  ;      (let [eid @(posh/q [:find '?e '. :where (into '[?e] eid-or-lookup)] conn)]
-  ;        (if (integer? eid)
-  ;          @(posh/pull conn pattern eid)
-  ;          {:db/id nil}))))))
-
 (def safe-q
   "A version of posh/q without any transaction pattern matching filters (al a posh) that delegates directly to d/q, and
   wraps in a reaction"
@@ -82,7 +59,7 @@
 ;; QUESTION Should this be wrapped in a reaction as well?
 (defn pull-many
   [app pattern eids]
-  (map (partial safe-pull (:conn app) pattern)
+  (map (partial posh/pull (:conn app) pattern)
        (deref-or-value eids)))
 
 
@@ -92,7 +69,7 @@
     (fn
       ([conn eid attr-ident options]
        (reaction
-         (get @(safe-pull conn [attr-ident] eid options) attr-ident)))
+         (get @(posh/pull conn [attr-ident] eid options) attr-ident)))
       ([conn eid attr-ident]
        (pull-attr conn eid attr-ident {})))))
 
@@ -104,7 +81,7 @@
        ;; Question: Should use cursor?
        (reaction
          (get-in
-           @(safe-pull conn (vec (filter keyword? attr-path)) eid options)
+           @(posh/pull conn (vec (filter keyword? attr-path)) eid options)
            attr-path)))
       ([conn eid attr-path]
        (pull-path conn eid attr-path {})))))

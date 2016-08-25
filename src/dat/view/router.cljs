@@ -49,6 +49,7 @@
 
 (reactor/register-handler ::path-change
   (fn [app db [_ new-path]]
+    (log/debug "Routing path change" new-path)
     (reactor/resolve-to app db [[:dat.view.settings/update [::current-path new-path]]])))
 
 
@@ -71,9 +72,9 @@
 ;; XXX Should probably handle this through a handler... but for now...
 (defn set-route!
   [app {:as route :keys [handler route-params]}]
-  (log/info "set-route! on route:" route)
+  (log/info "set-route! to route:" route)
   (let [flattened-params (-> route-params seq flatten vec)
-        _ (log/info "flattened-params:" flattened-params)
+        _ (log/debug "flattened-params:" flattened-params)
         path-for-route (apply bidi/path-for
                               (utils/deref-or-value (or (:routes app) routes/routes))
                               handler

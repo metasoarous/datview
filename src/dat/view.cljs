@@ -520,9 +520,7 @@
 (defn sorted-values
   [app attr-ident values]
   (if-let [sort-by-attr (:attribute/sort-by @(attr-signature-reaction app attr-ident))]
-    (do
-      (log/debug "Sorting" attr-ident "by" sort-by-attr)
-      (sort-by sort-by-attr values))
+    (sort-by sort-by-attr values)
     values))
 
 
@@ -757,11 +755,6 @@
                        (when old-value
                          [[:db/retract eid attr-ident old-value]]))))))
 
-(defn inspect
-  [stuff]
-  (doseq [x stuff]
-    (log/debug "label: " (:label x)))
-  stuff)
 
 ;; this is doing strange things with options when we memoize it, so leaving that out for now...
 ;(def ref-attr-options nil)
@@ -772,25 +765,37 @@
        (ref-attr-options app attr-ident nil))
       ([app attr-ident sort-key]
        (ref-attr-options app attr-ident sort-key {}))
-      ([app attr-ident sort-key options]
-       (let [sort-key (or sort-key :db/id)]
+      ([app attr-ident sort-key posh-options]
+       (let [posh-options (merge {:cache :forever} posh-options)
+             sort-key (or sort-key :db/id)]
          (reaction
-           (log/debug "CALLING REF_ATTR_OPTIONS!!!" attr-ident)
+           (log/debug "CALLING REF_ATTR_OPTIONS!!!" attr-ident "with posh options" posh-options)
            (let [options
                  (or (seq (:attribute.ref/options
                             @(safe-pull
                                (:conn app)
                                '[{:attribute.ref/options [:db/id :db/ident * {:e/type [*]}]}]
                                [:db/ident attr-ident]
-                               options)))
-                     @(safe-q '[:find [(pull ?e [:db/id :db/ident * {:e/type [*]}]) ...]
-                                :in $ % ?attr
-                                :where [?attr :attribute.ref/types ?type]
-                                       (type-instance ?type ?e)]
-                              (:conn app)
-                              query/rules
-                              [:db/ident attr-ident]
-                              options))]
+                               posh-options)))
+                     (let [eids
+                           ;@(posh/q '[:find [(pull ?e [:db/id :db/ident * {:e/type [*]}]) ...]])
+                           @(posh/q '[:find [?e ...]
+                                      :in $ ?attr
+                                      :where [?attr :attribute.ref/types ?type]
+                                             [?e :e/type ?type]]
+                                    (:conn app)
+                                    [:db/ident attr-ident]
+                                    posh-options)]
+                       (mapv (comp deref (partial posh/pull (:conn app) '[* {:e/type [*]}]))
+                             eids)))]
+                     ;@(posh/q '[:find [(pull ?e [:db/id :db/ident * {:e/type [*]}]) ...]
+                     ;           :in $ % ?attr
+                     ;           :where [?attr :attribute.ref/types ?type]
+                     ;                  (type-instance ?type ?e)]
+                     ;         (:conn app)
+                     ;         query/rules
+                     ;         [:db/ident attr-ident]
+                     ;         posh-options))]
              (->> options
                (sort-by sort-key)
                vec))))))))
@@ -1161,7 +1166,6 @@
               [label-view app attr-ident]
               (let [control-context (assoc local-context ::controls (::controls context))]
                 [represent app [::control-set control-context] [eid attr-ident value]])]
-             [frisk/FriskInline value]
              (for [value (let [value (utils/deref-or-value value)]
                            (sorted-values app attr-ident
                                (or
@@ -1432,9 +1436,7 @@
         ;; If a map, use id to defer to else case  TODO could look here for type ids first...
         (map? entity-or-eid)
         (if-let [type (:db/id (:e/type entity-or-eid))]
-          (do
-            (log/debug "The type is" type)
-            (type-pull app type))
+          (type-pull app type)
           (entity-pull* app (:db/id entity-or-eid)))
         ;; This is where all the real logic is:
         :else ;; assume eid

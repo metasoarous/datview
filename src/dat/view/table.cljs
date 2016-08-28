@@ -48,43 +48,34 @@
 
 ;(def table-column-selector-schema
   ;[{:db/id -1
-    ;:db/ident :table.view.column/attributes
+    ;:db/ident ::columns
     ;:db/cardinality [:db/ident :db.cardinality/many]
     ;:db/valueType [:db/ident :db.type/ref]}
    ;{:db/id -2
-    ;:db/ident :table.view.column.selector/unfolded-types
+    ;:db/ident ::types
     ;:db/cardinality [:db/ident :db.cardinality/many]
     ;:db/valueType [:db/ident :db.type/ref]}
-   ;{:db/id -3
-    ;:db/ident :table.view/column-selector}])
 
 ;; Here's what this looks like as datascript schema:
 
 (def table-column-selector-schema
-  {:table.view.column/attributes {:db/cardinality :db.cardinality/many
-                                  :db/valueType :db.type/ref}
-   :table.view.column.selector/unfolded-types {:db/cardinality :db.cardinality/many
-                                               :db/valueType :db.type/ref}})
-
-
-(defn new-column-selector
-  "Create an entity of type :dat.view.table/ColumnSelector, with attributes attrs merged in."
-  [attrs]
-  (merge {:db/id (d/tempid -1)
-          :e/type ::ColumnSelector}
-         attrs))
+  {::columns {:db/cardinality :db.cardinality/many
+              :db/valueType :db.type/ref}
+   ::base-type {:db/valueType :db.type/ref}
+   ::types {:db/cardinality :db.cardinality/many
+            :db/valueType :db.type/ref}})
 
 (defn selected-columns
   [app column-selector]
-  (posh/pull (:conn app) '[:table.view.column/attributes] column-selector))
+  (posh/pull (:conn app) '[::columns] column-selector))
 
 
 ;; This stuff is for representing the type relation tree, on which we organize the checkboxes for which attributes are selected in the column selector.
 ;; Really, this should be merged with the idea of serialized (as entities/datoms) pull expressions as the more standard way of doing things.
 
 (def type-tree-pull-pattern
-  '[:db/id :e/type :db/ident :e/name :table.view.column.selector/_unfolded-types :e.type/_isa
-    {:e.type/attributes [:db/id :db/ident :attribute/label :table.view.column/_attributes :attribute.ref/types]}])
+  '[:db/id :e/type :db/ident :e/name ::_types :e.type/_isa
+    {:e.type/attributes [:db/id :db/ident :attribute/label ::_columns :attribute.ref/types]}])
 
 (defn type-attribute-tree
   "Returns a posh reaction of the recursive pull of types defined by type-tree-pull-pattern"
@@ -131,13 +122,13 @@
 
 (defn unfolded-type?
   ([type-pull-data]
-   (boolean (seq (:table.view.column.selector/_unfolded-types type-pull-data)))))
+   (boolean (seq (::_types type-pull-data)))))
 
 ;; Should add a second arity to this so it can return a reaction based on ident or eid
 
 (defn selected-attribute?
   ([attr-pull-data]
-   (boolean (:table.view.column/_attributes attr-pull-data))))
+   (boolean (::_columns attr-pull-data))))
 
 
 (declare apply-type-to-query)
@@ -188,7 +179,7 @@
 
 (defn r-unfolded-type?
   [app type-id]
-  (reaction (unfolded-type? @(posh/pull (:conn app) '[:table.view.column.selector/_unfolded-types] type-id))))
+  (reaction (unfolded-type? @(posh/pull (:conn app) '[::_types] type-id))))
 
 (defn collapse-button
   "A collapse button for hiding information; arg collapse? should be a bool or an ratom thereof.
@@ -219,7 +210,7 @@
                    (fn [] (d/transact! (:conn app)
                                        [[(if @unfolded? :db/retract :db/add)
                                          column-selector
-                                         :table.view.column.selector/unfolded-types
+                                         ::types
                                          type-id]]))]
                   [re-com/label :style {:font-weight "bold"} :label (:e/name type-entity)]]])))
 
@@ -233,16 +224,17 @@
   have already been seen to avoid infinite recursion with type reference cycles (overcoats)."
   ([app column-selector attr-entity seen]
    (let [conn (:conn app)
-         checked? (posh/pull conn '[:table.view.column/_attributes] (:db/id attr-entity))]
+         checked? (posh/pull conn '[::_columns] (:db/id attr-entity))]
      [re-com/v-box
       :style {:padding-left "12px"}
       :gap "3px"
-      :children [[re-com/h-box
+      :children ["testing" attr-entity
+                 [re-com/h-box
                   :gap "5px"
                   :children [[re-com/checkbox
                               :model checked?
                               :on-change (fn [checked-now?]
-                                           (d/transact! conn [[(if checked-now? :db/add :db/retract) column-selector :table.view.column/attributes (:db/id attr-entity)]]))]
+                                           (d/transact! conn [[(if checked-now? :db/add :db/retract) column-selector ::columns (:db/id attr-entity)]]))]
                              [re-com/label :label (dat.view/pull-summary-string attr-entity)]]]
                  (when @checked?
                    ;; Present types for possible expansion
@@ -256,38 +248,39 @@
   "The rows in a attribute column selector for a table view given a type entity view with nested
   entities for attributes and subtypes."
   ([app column-selector type-id]
-   (attribute-column-selector-rows app column-selector type-id #{}))
+   [attribute-column-selector-rows app column-selector type-id #{}])
   ([app column-selector type-id seen]
    (let [type-entity (type-attribute-tree-reaction app type-id)
          unfolded? (r-unfolded-type? app type-id)]
-     (fn [_ type-id]
+     (fn [app column-selector type-id seen]
        (let [type-eid (:db/id @type-entity)]
          (if-not (seen type-eid)
            [re-com/v-box
             :style {:padding-left "10px"}
-            :children [[type-folder app column-selector @type-entity]
-                       (when (not @unfolded?)
-                         [re-com/v-box
-                          ;; First, render the same thing for the subtypes, so their attributes can show up if unfolded
-                          :children [[re-com/v-box
-                                      :children (for [subtype-id (map :db/id (:e.type/_isa @type-entity))]
-                                                  ^{:key subtype-id}
-                                                  [attribute-column-selector-rows app column-selector subtype-id (conj seen type-eid)])]
-                                     ;; This is all of the types directly assigned attribute selection rows
-                                     [re-com/v-box
-                                      :children (for [attr-entity (:e.type/attributes @type-entity)]
-                                                  ^{:key (:db/id attr-entity)}
-                                                  [attribute-column-selector-row app attr-entity (conj seen type-eid)])]]])]]
+            :children [[type-folder app column-selector @type-entity]]]
+           ;            (when (not @unfolded?)
+           ;              [re-com/v-box
+           ;               ;; First, render the same thing for the subtypes, so their attributes can show up if unfolded
+           ;               :children [[re-com/v-box
+           ;                           :children (for [subtype-id (map :db/id (:e.type/_isa @type-entity))]
+           ;                                       ^{:key subtype-id}
+           ;                                       [attribute-column-selector-rows app column-selector subtype-id (conj seen type-eid)])]
+           ;                          ;; This is all of the types directly assigned attribute selection rows
+           ;                          [re-com/v-box
+           ;                           :children (for [attr-entity (:e.type/attributes @type-entity)]
+           ;                                       ^{:key (:db/id attr-entity)}
+           ;                                       [attribute-column-selector-row app attr-entity (conj seen type-eid)])]]])]]
            [re-com/label :label "Seen"]))))))
 
 (representation/register-representation
   ::column-selector
   (fn [app [_ context-data] column-selector-id]
-    (let [collapse? (r/atom true)]
+    (let [collapse? (r/atom false)]
       (fn [app [_ context-data] column-selector-id]
         (let [base-type (::base-type context-data)]
           [re-com/v-box
            :children [[re-com/h-box
+
                        :children [[dat.view/collapse-button collapse?]
                                   [re-com/title :level :level3 :label "Table column selector:"]]]
                       (when-not @collapse?
@@ -296,7 +289,9 @@
                          :width "300px"
                          :max-height "300px"
                          :style {:overflow-y "scroll"}
-                         :child [attribute-column-selector-rows app column-selector-id (:db/id @(posh/pull (:conn app) '[:db/id] base-type))]])]])))))
+                         ;; TODO Switch to posh/entid when that is implemented
+                         :child (let [base-type-id (:db/id @(posh/pull (:conn app) '[:db/id] base-type))]
+                                  [attribute-column-selector-rows app column-selector-id base-type-id])])]])))))
 
 ; Build a magical selector for attributes
 (defn attribute-column-selector
@@ -392,7 +387,7 @@
 ;;    data.forEach(function(infoArray, index){})
 ;;       dataString = infoArray.join(",");
 ;;       csvContent += index < data.length ? dataString+ "\n" : dataString;
-;;    }); 
+;;    });
 ;;    
 ;; Then you can use JavaScript's window.open and encodeURI functions to download the CSV file like so:
 ;;    
@@ -422,11 +417,10 @@
 ;; Here we should be able to extend the table view via the context interpretation
 ;; But for right now just assuming data is eids
 (representation/register-representation
-  ::table-view
-  (fn [app [_ context-data] eids]
+  :dat.view/table-view
+  (fn [app [_ context-data] [base-type eids]]
     (let [column-selector (::column-selector context-data)
-          base-type (::base-type context-data)
-          _ (log/debug "table view context" context-data)
+          ;base-type (::base-type context-data)
           conn (:conn app)
           conn-reaction (dat.view/as-reaction conn)
           query-context (type-query-reaction conn-reaction base-type)]
@@ -434,7 +428,8 @@
       (fn [app [_ context-data] eids]
         (let [ordered-paths (ordered-paths @query-context)
               ;; Question: What if conn changes? Compute in inner fn?
-              rows @(posh/q (:query @query-context) conn eids)]
+              ;; TODO Should translate this to posh/q
+              rows @(dat.view/safe-q (:query @query-context) conn eids)]
           [re-com/v-box
            :gap "15px"
            :children [[re-com/title :level :level2 :label "Table view"]
@@ -460,8 +455,8 @@
   ;; Should generate a column-selector from
   [app column-selector base-type eids]
   (dat.view/represent app
-                      [::table-view {::mode ::eids
-                                     ::base-type base-type
-                                     ::column-selector column-selector}]
+                      [:dat.view/table-view {::mode ::eids
+                                             ::base-type base-type
+                                             ::column-selector column-selector}]
                       eids))
 

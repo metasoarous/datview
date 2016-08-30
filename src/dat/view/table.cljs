@@ -23,7 +23,8 @@
     [cljs-uuid-utils.core :as uuid]
     [goog.date.Date]
     [bidi.bidi :as bidi]
-    [taoensso.timbre :as log]))
+    [taoensso.timbre :as log]
+    [datafrisk.core :as frisk]))
 
 
 
@@ -120,10 +121,6 @@
 
 ;; First some stuff for producing information based on pull data
 
-(defn unfolded-type?
-  ([type-pull-data]
-   (boolean (seq (::_types type-pull-data)))))
-
 ;; Should add a second arity to this so it can return a reaction based on ident or eid
 
 (defn selected-attribute?
@@ -177,9 +174,17 @@
   ([conn-reaction base-type-id]
    (reaction (dissoc (apply-type-to-query @conn-reaction base-type-id) :base-path :base-sym))))
 
+(defn unfolded-types
+  [app column-selector]
+  (posh/pull (:conn app) '[* {::types [:db/id]}] column-selector {:cache :forever}))
+
 (defn r-unfolded-type?
-  [app type-id]
-  (reaction (unfolded-type? @(posh/pull (:conn app) '[::_types] type-id))))
+  [app column-selector type-id]
+  (reaction
+    (let [pull-results @(unfolded-types app column-selector)]
+      (not
+        ((->> pull-results ::types (map :db/id) set)
+         type-id)))))
 
 (defn collapse-button
   "A collapse button for hiding information; arg collapse? should be a bool or an ratom thereof.
@@ -200,15 +205,15 @@
   [app column-selector type-entity]
   ;; Could do this as pull, but would only want to if we had hooked up smarter query rendering capabilities
   (let [type-id (:db/id type-entity)
-        unfolded? (r-unfolded-type? app type-id)]
-    (fn [_ type-entity]
+        unfolded? (r-unfolded-type? app column-selector type-id)]
+    (fn [app column-selector type-entity]
       [re-com/h-box
        :gap "3px"
        :children [[dat.view/collapse-button
                    @unfolded?
                    ;; TODO Rewrite in terms of the dispatch
                    (fn [] (d/transact! (:conn app)
-                                       [[(if @unfolded? :db/retract :db/add)
+                                       [[(if @unfolded? :db/add :db/retract)
                                          column-selector
                                          ::types
                                          type-id]]))]
@@ -219,17 +224,27 @@
 
 (declare attribute-column-selector-rows)
 
+;(defn selected-columns
+;  [app column-selector]
+;  (posh/pull (:conn app) [::columns] column-selector))
+
+(defn column-selected?
+  [app column-selector attr-eid]
+  ;; TODO need to generalize attr-eid here to be any id; ok because only usage below is an entity always
+  (reaction
+    ((->> @(selected-columns app column-selector) ::columns (map :db/id) set)
+     attr-eid)))
+
 (defn attribute-column-selector-row
   "The selector for whether a particular attribute should end up in the output data. Seen should be a set of type identities which
   have already been seen to avoid infinite recursion with type reference cycles (overcoats)."
   ([app column-selector attr-entity seen]
    (let [conn (:conn app)
-         checked? (posh/pull conn '[::_columns] (:db/id attr-entity))]
+         checked? (column-selected? app column-selector (:db/id attr-entity))]
      [re-com/v-box
       :style {:padding-left "12px"}
       :gap "3px"
-      :children ["testing" attr-entity
-                 [re-com/h-box
+      :children [[re-com/h-box
                   :gap "5px"
                   :children [[re-com/checkbox
                               :model checked?
@@ -242,7 +257,7 @@
                     :children (for [ref-type-id (map :db/id (:attribute.ref/types attr-entity))]
                                 ;; Not sure what the semantics of nil/key are in this case?
                                 ^{:key ref-type-id}
-                                [attribute-column-selector-rows app ref-type-id seen])])]])))
+                                [attribute-column-selector-rows app column-selector ref-type-id seen])])]])))
 
 (defn attribute-column-selector-rows
   "The rows in a attribute column selector for a table view given a type entity view with nested
@@ -251,36 +266,38 @@
    [attribute-column-selector-rows app column-selector type-id #{}])
   ([app column-selector type-id seen]
    (let [type-entity (type-attribute-tree-reaction app type-id)
-         unfolded? (r-unfolded-type? app type-id)]
+         unfolded? (r-unfolded-type? app column-selector type-id)]
      (fn [app column-selector type-id seen]
        (let [type-eid (:db/id @type-entity)]
          (if-not (seen type-eid)
            [re-com/v-box
             :style {:padding-left "10px"}
-            :children [[type-folder app column-selector @type-entity]]]
-           ;            (when (not @unfolded?)
-           ;              [re-com/v-box
-           ;               ;; First, render the same thing for the subtypes, so their attributes can show up if unfolded
-           ;               :children [[re-com/v-box
-           ;                           :children (for [subtype-id (map :db/id (:e.type/_isa @type-entity))]
-           ;                                       ^{:key subtype-id}
-           ;                                       [attribute-column-selector-rows app column-selector subtype-id (conj seen type-eid)])]
-           ;                          ;; This is all of the types directly assigned attribute selection rows
-           ;                          [re-com/v-box
-           ;                           :children (for [attr-entity (:e.type/attributes @type-entity)]
-           ;                                       ^{:key (:db/id attr-entity)}
-           ;                                       [attribute-column-selector-row app attr-entity (conj seen type-eid)])]]])]]
-           [re-com/label :label "Seen"]))))))
+            :children [[type-folder app column-selector @type-entity]
+                       (when-not @unfolded?
+                         [re-com/v-box
+                          ;; First, render the same thing for the subtypes, so their attributes can show up if unfolded
+                          :children [[re-com/v-box
+                                      :children (for [subtype-id (map :db/id (:e.type/_isa @type-entity))]
+                                                  ^{:key subtype-id}
+                                                  [attribute-column-selector-rows app column-selector subtype-id (conj seen type-eid)])]
+                                     ;; This is all of the types directly assigned attribute selection rows
+                                     [re-com/v-box
+                                      :children (for [attr-entity (:e.type/attributes @type-entity)]
+                                                  ^{:key (:db/id attr-entity)}
+                                                  [attribute-column-selector-row app column-selector attr-entity (conj seen type-eid)])]]])]]
+           [re-com/label :label "This type has already been specified"]))))))
+
+(defn collapsed?
+  [])
 
 (representation/register-representation
   ::column-selector
   (fn [app [_ context-data] column-selector-id]
-    (let [collapse? (r/atom false)]
+    (let [collapse? (r/atom true)]
       (fn [app [_ context-data] column-selector-id]
         (let [base-type (::base-type context-data)]
           [re-com/v-box
            :children [[re-com/h-box
-
                        :children [[dat.view/collapse-button collapse?]
                                   [re-com/title :level :level3 :label "Table column selector:"]]]
                       (when-not @collapse?
@@ -425,7 +442,7 @@
           conn-reaction (dat.view/as-reaction conn)
           query-context (type-query-reaction conn-reaction base-type)]
           ;query-results (evaluate-query conn query-context eids)]
-      (fn [app [_ context-data] eids]
+      (fn [app [_ context-data] [base-type eids]]
         (let [ordered-paths (ordered-paths @query-context)
               ;; Question: What if conn changes? Compute in inner fn?
               ;; TODO Should translate this to posh/q

@@ -76,7 +76,8 @@
 
 (def type-tree-pull-pattern
   '[:db/id :e/type :db/ident :e/name ::_types :e.type/_isa
-    {:e.type/attributes [:db/id :db/ident :attribute/label ::_columns :attribute.ref/types]}])
+    {:e.type/attributes [:db/id :db/ident :attribute/label ::_columns :attribute.ref/types {:db/valueType [:db/ident]}]
+     :db/valueType [:db/ident]}])
 
 (defn type-attribute-tree
   "Returns a posh reaction of the recursive pull of types defined by type-tree-pull-pattern"
@@ -136,10 +137,16 @@
         attr-sym (gen-sym attr-ident)
         path (conj base-path attr-ident)
         sym-mapping (assoc sym-mapping attr-sym path)
+        new-where-clause (if (-> attr-entity :db/valueType :db/ident (= :db.type/ref))
+                           [base-sym attr-ident attr-sym]
+                           [(list 'get-else '$ base-sym attr-ident "NA") attr-sym])
         new-context (assoc context
                            :query (-> query
                                       (update-in [:find] conj attr-sym)
-                                      (update-in [:where] conj [base-sym attr-ident attr-sym]))
+                                      (update-in [:where]
+                                                 conj
+                                                 new-where-clause))
+                                                 ;[base-sym attr-ident attr-sym]))
                            :base-path path
                            :sym-mapping sym-mapping
                            :base-sym attr-sym)]

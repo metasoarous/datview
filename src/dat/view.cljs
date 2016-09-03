@@ -750,8 +750,9 @@
                           [{:db/id id}] id
                           [id] id)]
      (send-tx! app
-               (concat [[:db/add eid attr-ident new-value]]
-                       (when old-value
+               (concat (when-not (nil? new-value)
+                         [[:db/add eid attr-ident new-value]])
+                       (when-not (nil? old-value)
                          [[:db/retract eid attr-ident old-value]]))))))
 
 
@@ -813,17 +814,24 @@
          value (or (id-fn value)
                    (and (vector? value) @(pull-attr (:conn app) value id-fn))
                    value)]
-     [re-com/single-dropdown
-      :style {:min-width "150px"}
-      :filter-box? true
-      :choices options
-      ;; TODO Not sure if this will break things or not; have to test
-      ;:model (:db/id value)
-      :id-fn id-fn
-      ;; For now hard coding this... For some reason using the summary function here is messing everything up
-      :label-fn (or (::label-fn context) pull-summary-string)
-      :model value
-      :on-change (partial apply-reference-change! app eid attr-ident value)])))
+     [:div {:style h-box-styles}
+      [re-com/single-dropdown
+       :style {:min-width "150px"}
+       :filter-box? true
+       :choices options
+       ;; TODO Not sure if this will break things or not; have to test
+       ;:model (:db/id value)
+       :id-fn id-fn
+       ;; For now hard coding this... For some reason using the summary function here is messing everything up
+       :label-fn (or (::label-fn context) pull-summary-string)
+       :model value
+       :on-change (partial apply-reference-change! app eid attr-ident value)]
+      (when-not (nil? value)
+        [re-com/md-icon-button :md-icon-name "zmdi-close-circle"
+         :size :smaller
+         :style {:margin "3px 7px"}
+         :tooltip "Retract"
+         :on-click #(apply-reference-change! app eid attr-ident value nil)])])))
 
 
 ;; Simple md (markdown) component; Not sure if we really need to include this in dat.view or not...

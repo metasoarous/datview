@@ -135,7 +135,9 @@
     ([app representation-id {;; Options, in order of precedence in consequent merging
                              :as local-context
                              :keys [;; When the component is in a scope closed over by some particular attribute:
-                                    db.attr/ident]}] ;; db/ident of the attribute; precedence below
+                                    db.attr/ident
+                                    dat.view.context/globals]}]
+                                     ;; db/ident of the attribute; precedence below
      (reaction
        (try
          (let [base-context @(component-context app)]
@@ -149,8 +151,10 @@
                    (get-in base-context [:dat.view/attr-config ident representation-id]))))
                ;; Need to also get the value type and card config by the attr-config if that's all that's present; Shouldn't ever
                ;; really need to pass in manually XXX
+             globals
              local-context
-             {::locals local-context}))
+             {::locals local-context
+              ::globals globals}))
          (catch :default e
            (log/error e "Unable to build component context for local-context:" local-context "representation-id" representation-id)))))))
 

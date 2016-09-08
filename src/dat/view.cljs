@@ -554,6 +554,8 @@
 
 
 (defn attr-entity-order
+  ;; This is terrible assumption; This thing should be querying for it's own data, ideally, which should be okay if we're caching
+  ;; In particular, we shouldn't need to do `:db.type/ref?` here...
   [attr-data]
   (or (:e/order attr-data)
       (cond
@@ -983,6 +985,8 @@
                        :style (::input-style context) ;; TODO Get input-style passed along through everywhere else
                        :width (-> context ::input-style :width)
                        :on-change (make-change-handler app eid attr-ident value)]
+                      (when-let [placeholder (::placeholder context)]
+                        [:placeholder placeholder])
                       (when-let [rows (::text-rows context)]
                         [:rows rows])))
          ;; Misc; Simple input, but maybe do a dynamic type dispatch as well for customization...
@@ -992,6 +996,8 @@
                        :style (::input-style context)
                        :width (-> context ::input-style :width)
                        :on-change (make-change-handler app eid attr-ident value)]
+                      (when-let [placeholder (::placeholder context)]
+                        [:placeholder placeholder])
                       (when-let [rows (::text-rows context)]
                         [:rows rows]))))])))
 

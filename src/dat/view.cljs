@@ -637,7 +637,8 @@
               ;; Part of clever trick to avoid having to rerender form when toggling
               (when-not (nil? @edit?)
                 [:div {:style (merge h-box-styles
-                                     {:padding "15px"}
+                                     {:padding "15px"
+                                      :width "100%"}
                                      ;; Part of clever trick to avoid having to rerender form when toggling
                                      (when-not @edit? {:display "none"}))}
                   [:h3 "Editing"]
@@ -661,7 +662,8 @@
   ::pull-view
   (fn [app [_ context] [pull-expr eid]]
     ;; QUESTION Should this pull-expr computation be a function for reuse?
-    (let [pull-expr (or pull-expr (::pull-expr context) @(entity-pull app eid) base-pull)
+    (let [;pull-expr (or pull-expr (::pull-expr context) @(entity-pull app eid) base-pull)
+          pull-expr @(entity-pull app eid (::pull-summary-attrs context))
           pull-data (posh/pull (:conn app) pull-expr eid)
           child-context (-> (:dat.view.context/locals context)
                             ;; !!! Extract and merge the metadata context from the pull expression
@@ -1374,13 +1376,14 @@
 
 ;; XXX Note; cyclic recursive isComponent attribute relations break this
 ;; BIG TODO QUESTION Figure out how we deal with the different needs of base-pull between view and control contexts; Don't always want forms for things we might just pull along for ride on view, & vice versa
+;; Ughh... we don't want to be memoizing this for context which could change a ton, only for the pull-summary-attrs
 ;(def type-pull nil)
 (def type-pull
   (memoize
     (fn type-pull*
       ([app base-type]
-       (type-pull* app {} base-type))
-      ([app context base-type]
+       (type-pull* app base-type {}))
+      ([app base-type pull-summary-attrs]
        (reaction
          (let [type-data @(type-data app base-type)]
            (walk/postwalk
@@ -1416,7 +1419,7 @@
                                     {:ref true})}
                                  {(:db/ident attr)
                                   ;; TODO Handle these
-                                  (-> (::pull-summary-attrs context)
+                                  (-> pull-summary-attrs
                                       (get (:db/ident attr))
                                       (concat [:e/name :e/description :db/ident {:e/type [:db/id :db/ident]}])
                                       vec
@@ -1441,25 +1444,27 @@
 (def entity-pull
   (memoize
    (fn entity-pull*
-      [app entity-or-eid]
+     ([app entity-or-eid]
+      (entity-pull* app entity-or-eid {}))
+     ([app entity-or-eid pull-summary-attrs]
       (cond
         ;; If derefable, deref first
         (implements? IDeref entity-or-eid)
-        (entity-pull* app @entity-or-eid)
+        (entity-pull* app @entity-or-eid pull-summary-attrs)
         ;; If a map, use id to defer to else case  TODO could look here for type ids first...
         (map? entity-or-eid)
         (if-let [type (:db/id (:e/type entity-or-eid))]
-          (type-pull app type)
-          (entity-pull* app (:db/id entity-or-eid)))
+          (type-pull app type pull-summary-attrs)
+          (entity-pull* app (:db/id entity-or-eid) pull-summary-attrs))
         ;; This is where all the real logic is:
         :else ;; assume eid
         (let [type-id-rx (pull-path (:conn app) entity-or-eid [:e/type :db/id])]
           (reaction
             (if-let [type-id @type-id-rx]
-              @(type-pull app type-id)
+              @(type-pull app type-id pull-summary-attrs)
               (do
                 (log/warn "Bad type id for entity-or-eid: " entity-or-eid)
-                base-pull))))))))
+                base-pull)))))))))
 
 
 ;; This is effectively our metadata model

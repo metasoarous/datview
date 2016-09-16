@@ -266,6 +266,7 @@
   (match [pull-data]
     [{:e/name name}] name
     [{:attribute/label label}] label
+    [{:db/ident ident :e/type {:db/ident :e.type/Type}}] (str (name ident) " Type")
     [{:db/ident ident}] (name ident)
     [{:e/type {:db/ident type-ident}}] (str (name type-ident) " instance")
     ;; A terrible assumption really, but fine enough for now
@@ -1419,8 +1420,7 @@
                                     {:ref true})}
                                  {(:db/ident attr)
                                   ;; TODO Handle these
-                                  (-> pull-summary-attrs
-                                      (get (:db/ident attr))
+                                  (-> (get pull-summary-attrs (:db/ident attr))
                                       (concat [:e/name :e/description :db/ident {:e/type [:db/id :db/ident]}])
                                       vec
                                       (with-meta {;::representation ::pull-summary-view

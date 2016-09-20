@@ -128,25 +128,39 @@
   ([attr-pull-data]
    (boolean (::_columns attr-pull-data))))
 
-
 (declare apply-type-to-query)
+
+;(defn conj-if-not)
+;; Pick up todo: Pull out new find and new where and new path under a single if (-> attr ... :ref?)
+;; Then do the same for where the whole thing gets initialized for removing based eid as well
+;; Could also just do everything after the fact based on paths, but feels somewhat wrong.
+;; Though would include duplicate rows that way, for better or worse
+;; If it's easier I'll do it that way maybe
 
 (defn apply-attribute-to-query
   [db {:as context :keys [query base-path sym-mapping base-sym]} attr-entity]
   (let [attr-ident (:db/ident attr-entity)
         attr-sym (gen-sym attr-ident)
+        ref-attr? (-> attr-entity :db/valueType :db/ident (= :db.type/ref))
+        [path find-clause]
+        (if (and ref-attr? (not (::show-ids? context)))
+          [base-path (:find query)]
+          [(conj base-path attr-ident)
+           (conj (:find query) attr-sym)])
         path (conj base-path attr-ident)
         sym-mapping (assoc sym-mapping attr-sym path)
-        new-where-clause (if (-> attr-entity :db/valueType :db/ident (= :db.type/ref))
+        new-where-clause (if ref-attr?
                            [base-sym attr-ident attr-sym]
+                           ;; This does not work... really just need to switch to pull expressions
+                           ;[(list 'get-else '$ base-sym attr-ident 0) attr-sym]
                            [(list 'get-else '$ base-sym attr-ident "NA") attr-sym])
         new-context (assoc context
                            :query (-> query
-                                      (update-in [:find] conj attr-sym)
-                                      (update-in [:where]
-                                                 conj
-                                                 new-where-clause))
-                                                 ;[base-sym attr-ident attr-sym]))
+                                      (assoc :find find-clause)
+                                      (update :where
+                                              conj
+                                              new-where-clause))
+                                              ;[base-sym attr-ident attr-sym]))
                            :base-path path
                            :sym-mapping sym-mapping
                            :base-sym attr-sym)]
@@ -345,6 +359,7 @@
 (representation/register-representation
   ::row-view
   (fn [app [_ context-data] row]
+    (let [])
     [:tr
      ;; If here we know in context what the path is to the data, we should pass that along as well
      (for [[i value] (map-indexed vector row)]
@@ -369,8 +384,8 @@
 (defn path-name
   [path]
   (if-let [path-names (seq (map name path))]
-    (clojure.string/join "/" path-names)
-    "base-eid"))
+    (clojure.string/join "/" (take-last 2 path-names))
+    "db-id"))
 
 (defn ordered-paths
   [{:as query-context :keys [query sym-mapping]}]

@@ -34,7 +34,7 @@
   ;; Leaving this out for now
   ;:global-vars {*warn-on-reflection* true}
   :cljsbuild {:builds [{:id "release"
-                        :source-paths ["src" "bench/src"]
+                        :source-paths ["src"]
                         :assert false
                         :compiler {:output-to     "release-js/datview.bare.js"
                                    :optimizations :advanced
@@ -47,7 +47,7 @@
                    :plugins [[lein-cljsbuild "1.1.2"]
                              [lein-typed "0.3.5"]]
                    :cljsbuild {:builds [{:id "advanced"
-                                         :source-paths ["src" "bench/src" "test"]
+                                         :source-paths ["src" "test"]
                                          :compiler {:output-to     "target/datview.js"
                                                     :optimizations :advanced
                                                     :source-map    "target/datview.js.map"
@@ -55,7 +55,7 @@
                                                     :recompile-dependents false
                                                     :parallel-build true}}
                                         {:id "none"
-                                         :source-paths ["src" "bench/src" "test" "dev"]
+                                         :source-paths ["src" "test" "dev"]
                                          :compiler {:main          datview.test
                                                     :output-to     "target/datview.js"
                                                     :output-dir    "target/none"

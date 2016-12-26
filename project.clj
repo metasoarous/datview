@@ -7,6 +7,8 @@
   :dependencies [[org.clojure/clojure "1.9.0-alpha6"]
                  [org.clojure/clojurescript "1.9.36"]
                  [org.clojure/core.match "0.3.0-alpha4"]
+                 ;; datomic needed for reader literals
+                 [com.datomic/datomic-free "0.9.5372" :exclusions [joda-time org.slf4j/slf4j-nop com.google.guava/guava]]
                  ;; Datsys things
                  [datspec "0.0.1-alpha1-SNAPSHOT"]
                  [datreactor "0.0.1-alpha1-SNAPSHOT"]

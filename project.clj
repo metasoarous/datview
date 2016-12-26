@@ -20,7 +20,7 @@
                  [com.andrewmcveigh/cljs-time "0.5.0-alpha1"]
                  [testdouble/clojurescript.csv "0.2.0"]
                  [datascript "0.15.0"]
-                 [posh "0.5.3.3"]
+                 [posh "0.5.4"]
                  [reagent "0.5.1"]
                  [markdown-clj "0.9.89"]
                  [servant "0.1.5"]

@@ -26,7 +26,8 @@
                  [re-com "0.8.3"]
                  [bidi "2.0.9"]
                  [io.rkn/conformity "0.4.0"] ;; should this be here?
-                 [prismatic/plumbing "0.5.2"]] ;; aren't using currently
+                 [prismatic/plumbing "0.5.2"] ;; aren't using currently
+                 [com.lucasbradstreet/cljs-uuid-utils "1.0.2"]] ;; used for table view
   ;;
   ;; ## Snipped from DataScript's
   ;; ============================

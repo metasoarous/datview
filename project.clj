@@ -4,14 +4,11 @@
   :license {:name "Eclipse Public License"
             :url "http://www.eclipse.org/legal/epl-v10.html"}
   :min-lein-version "2.0.0"
-  :exclusions [cljsjs/react] ; data-frisk-reagent pulls in react-with-addons, which conflicts w/ react
   :dependencies [[org.clojure/clojure "1.9.0-alpha6"]
                  [org.clojure/clojurescript "1.9.36"]
                  [org.clojure/core.match "0.3.0-alpha4"]
                  ;; datomic needed for reader literals
                  [com.datomic/datomic-free "0.9.5372" :exclusions [joda-time org.slf4j/slf4j-nop com.google.guava/guava]]
-                 ;; so we still work if data-frisk-reagent drops out of our dependency chain...
-                 [cljsjs/react-with-addons "15.4.0-0"]
                  ;; Datsys things
                  [datspec "0.0.1-alpha1-SNAPSHOT"]
                  [datreactor "0.0.1-alpha1-SNAPSHOT"]
@@ -21,11 +18,11 @@
                  [testdouble/clojurescript.csv "0.2.0"]
                  [datascript "0.15.0"]
                  [posh "0.5.4"]
-                 [reagent "0.5.1"]
+                 [reagent "0.6.0"]
                  [markdown-clj "0.9.89"]
                  [servant "0.1.5"]
                  ;; Not sure if this should just be a dev dep; It's kinda nice
-                 [data-frisk-reagent "0.2.5"]
+                 [data-frisk-reagent "0.3.5"]
                  [re-com "0.8.3"]
                  [bidi "2.0.9"]
                  [io.rkn/conformity "0.4.0"] ;; should this be here?

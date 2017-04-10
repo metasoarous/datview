@@ -7,6 +7,8 @@
   :dependencies [[org.clojure/clojure "1.9.0-alpha6"]
                  [org.clojure/clojurescript "1.9.36"]
                  [org.clojure/core.match "0.3.0-alpha4"]
+                 ;; datomic needed for reader literals
+                 [com.datomic/datomic-free "0.9.5372" :exclusions [joda-time org.slf4j/slf4j-nop com.google.guava/guava]]
                  ;; Datsys things
                  [datspec "0.0.1-alpha1-SNAPSHOT"]
                  [datreactor "0.0.1-alpha1-SNAPSHOT"]
@@ -15,16 +17,17 @@
                  [com.andrewmcveigh/cljs-time "0.5.0-alpha1"]
                  [testdouble/clojurescript.csv "0.2.0"]
                  [datascript "0.15.0"]
-                 [posh "0.5.3.3"]
-                 [reagent "0.5.1"]
+                 [posh "0.5.4"]
+                 [reagent "0.6.0"]
                  [markdown-clj "0.9.89"]
                  [servant "0.1.5"]
                  ;; Not sure if this should just be a dev dep; It's kinda nice
-                 [data-frisk-reagent "0.2.5"]
+                 [data-frisk-reagent "0.3.5"]
                  [re-com "0.8.3"]
                  [bidi "2.0.9"]
                  [io.rkn/conformity "0.4.0"] ;; should this be here?
-                 [prismatic/plumbing "0.5.2"]] ;; aren't using currently
+                 [prismatic/plumbing "0.5.2"] ;; aren't using currently
+                 [com.lucasbradstreet/cljs-uuid-utils "1.0.2"]] ;; used for table view
   ;;
   ;; ## Snipped from DataScript's
   ;; ============================
@@ -34,7 +37,7 @@
   ;; Leaving this out for now
   ;:global-vars {*warn-on-reflection* true}
   :cljsbuild {:builds [{:id "release"
-                        :source-paths ["src" "bench/src"]
+                        :source-paths ["src"]
                         :assert false
                         :compiler {:output-to     "release-js/datview.bare.js"
                                    :optimizations :advanced
@@ -47,7 +50,7 @@
                    :plugins [[lein-cljsbuild "1.1.2"]
                              [lein-typed "0.3.5"]]
                    :cljsbuild {:builds [{:id "advanced"
-                                         :source-paths ["src" "bench/src" "test"]
+                                         :source-paths ["src" "test"]
                                          :compiler {:output-to     "target/datview.js"
                                                     :optimizations :advanced
                                                     :source-map    "target/datview.js.map"
@@ -55,7 +58,7 @@
                                                     :recompile-dependents false
                                                     :parallel-build true}}
                                         {:id "none"
-                                         :source-paths ["src" "bench/src" "test" "dev"]
+                                         :source-paths ["src" "test" "dev"]
                                          :compiler {:main          datview.test
                                                     :output-to     "target/datview.js"
                                                     :output-dir    "target/none"

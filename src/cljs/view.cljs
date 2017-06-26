@@ -1622,7 +1622,6 @@
   ;;  The public API: these two attributes
   [conn   ;; You can access this for your posh queries; based on reactor unless otherwise specified
    config ;; How you control the instantiation of Datview; options:
-   datascript
    routes ;; Bidi routes data (will abstract more eventually)
    ;; * :datascript/schema
    ;; * :dat.view/conn
@@ -1639,13 +1638,11 @@
                                            :dat.sync.remote.db/id {:db/unique :db.unique/identity}}
                                           (:datascript/schema config))
             ;; Should try switching to r/atom
-            conn (or conn (:conn datascript) (::conn config) (d/create-conn base-schema))
+            conn (or conn (::conn config) (d/create-conn base-schema))
             routes (or routes (::routes config) routes/routes) ;; base routes
             main (or main (::main config))
             history (router/make-history)
             component (assoc component :conn conn :base-conn conn :main main :history history :routes routes)]
-        ;; ***TODO: snag connection from datascript component
-
         ;; Transact default settings to db
         (d/transact! conn default-settings)
         ;; Start posh

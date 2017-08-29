@@ -1623,6 +1623,7 @@
   [conn   ;; You can access this for your posh queries; based on reactor unless otherwise specified
    config ;; How you control the instantiation of Datview; options:
    routes ;; Bidi routes data (will abstract more eventually)
+   datascript
    ;; * :datascript/schema
    ;; * :dat.view/conn
    ;; Other (semi-)optional dependencies
@@ -1633,12 +1634,14 @@
   (start [component]
     (try
       (log/info "Starting Datview")
+      (log/info "datascript-conn-Datview" (:conn datascript))
       ;; TODO Ugg... need to have a way for Datsync to register its default schema
-      (let [base-schema (utils/deep-merge {:db/ident {:db/ident :db/ident :db/unique :db.unique/identity}
+      (let [base-schema (utils/deep-merge {:db/ident {:db/ident :db/ident
+                                                      :db/unique :db.unique/identity}
                                            :dat.sync.remote.db/id {:db/unique :db.unique/identity}}
                                           (:datascript/schema config))
             ;; Should try switching to r/atom
-            conn (or conn (::conn config) (d/create-conn base-schema))
+            conn (or conn (:conn datascript) (::conn config) (d/create-conn base-schema))
             routes (or routes (::routes config) routes/routes) ;; base routes
             main (or main (::main config))
             history (router/make-history)

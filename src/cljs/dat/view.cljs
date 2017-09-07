@@ -129,6 +129,12 @@
   [app remote-event]
   (dispatch! app [:dat.remote/send-event! remote-event]))
 
+(defn global-tx! [app txs]
+  (dispatch!
+    app
+    {:dat.sync/event :dat.sync/tx
+     :txs txs}))
+
 
 
 
@@ -411,9 +417,15 @@
         (send-remote-event! app [:dat.sync.remote/tx [[:db.fn/retractEntity remote-eid]]]))
       (log/error "Unable to find remote db id for entity" (d/pull @(:conn app) '[*] eid)))))
 
+(defn delete-entity-handler2*
+  [app eid]
+  (when (js/confirm "Delete entity?")
+    (log/info "Deleting entity:" eid)
+    (global-tx! app [[:db.fn/retractEntity eid]])))
+
 (defn ^:dynamic delete-entity-handler
   [app eid]
-  (delete-entity-handler* app eid))
+  (delete-entity-handler2* app eid))
 
 (representation/register-representation
   ::delete-entity-control
@@ -746,6 +758,28 @@
               ;; Probably need to cast, since this is in general a string so far
               [[:db/add eid attr-ident new-value]])))))))
 
+(defn db-update-value [db eid attr-ident new-value]
+  (let [value-type-ident (d/q '[:find ?value-type-ident .
+                                :in $ % ?attr-ident
+                                :where (attr-ident-value-type-ident ?attr-ident ?value-type-ident)]
+                              db
+                              query/rules
+                              attr-ident)
+        new-value (cast-value-type value-type-ident new-value)
+        old-value (attr-ident (d/entity db eid))]
+    [(when old-value
+       [:db/retract eid attr-ident old-value])
+     (when new-value
+       [:db/add eid attr-ident new-value])]))
+
+(defn make-change-handler2
+  "Takes an app, an eid attr-ident and an old value, and builds a change handler for that value"
+  [app eid attr-ident]
+  (fn [new-value]
+    (log/info "change-handler" eid attr-ident new-value)
+    (global-tx!
+      app
+      [[:db.fn/call db-update-value eid attr-ident new-value]])))
 
 (defn apply-reference-change!
   ([app eid attr-ident new-value]
@@ -987,7 +1021,9 @@
                        :model (str value) ;; just to make sure...
                        :style (::input-style context) ;; TODO Get input-style passed along through everywhere else
                        :width (-> context ::input-style :width)
-                       :on-change (make-change-handler app eid attr-ident value)]
+                       :on-change ;;(make-change-handler app eid attr-ident value)
+                       (make-change-handler2 app eid attr-ident)
+                       ]
                       (when-let [placeholder (::placeholder context)]
                         [:placeholder placeholder])
                       (when-let [rows (::text-rows context)]
@@ -998,7 +1034,9 @@
                        :model (str value) ;; just to make sure...
                        :style (::input-style context)
                        :width (-> context ::input-style :width)
-                       :on-change (make-change-handler app eid attr-ident value)]
+                       :on-change ;;(make-change-handler app eid attr-ident value)
+                       (make-change-handler2 app eid attr-ident)
+                       ]
                       (when-let [placeholder (::placeholder context)]
                         [:placeholder placeholder])
                       (when-let [rows (::text-rows context)]

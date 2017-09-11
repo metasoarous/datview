@@ -119,13 +119,13 @@
 
 ;; TODO Should rename send-remote-tx!
 (defn send-tx!
-  "Helper function for dispatching tx messages to server."
+  "DEPRECATED: Helper function for dispatching tx messages to server."
   [app tx-forms]
   ;; TODO This should be smarter, and look to see whether dat.sys is loaded, and dispatch occordingly
   (dispatch! app [:dat.sync.client/send-remote-tx tx-forms]))
 
-
 (defn send-remote-event!
+  "DEPRECATED"
   [app remote-event]
   (dispatch! app [:dat.remote/send-event! remote-event]))
 
@@ -134,8 +134,6 @@
     app
     {:dat.sync/event :dat.sync/tx
      :txs txs}))
-
-
 
 
 ;; Importing styles, etc
@@ -408,6 +406,7 @@
   ;(:dat.sync.remote.db/id (d/pull @(:conn app) [:dat.sync.remote.db/id] eid)))
 
 (defn delete-entity-handler*
+  "DEPRECATED"
   [app eid]
   (when (js/confirm "Delete entity?")
     (log/info "Deleting entity:" eid)
@@ -731,6 +730,27 @@
     (:db.type/long :db.type/integer) (js/parseInt str-value)
     str-value))
 
+(defn parse-from-ui
+  [value-type-ident in-value]
+  (case value-type-ident
+    (:db.type/double :db.type/float) (js/parseFloat in-value)
+    (:db.type/long :db.type/integer) (js/parseInt in-value)
+    :db.type/ref (do
+                   (log/info "parsing ref ui" in-value)
+                   (or
+                     (:db/id in-value)
+                     in-value))
+    in-value))
+
+(defn parse-from-db
+  [value-type-ident in-value]
+  (case value-type-ident
+    :db.type/ref (do
+                   (log/info "parsing ref db" in-value)
+                   (or
+                     (:db/id in-value)
+                     in-value))
+    in-value))
 
 ;; TODO Rewrite in terms of event registration
 (defn make-change-handler
@@ -765,23 +785,24 @@
                               db
                               query/rules
                               attr-ident)
-        new-value (cast-value-type value-type-ident new-value)
-        old-value (attr-ident (d/entity db eid))]
+        new-value (parse-from-ui value-type-ident new-value)
+        ;;(cast-value-type value-type-ident new-value)
+        old-value (parse-from-db value-type-ident (attr-ident (d/entity db eid)))]
     [(when old-value
        [:db/retract eid attr-ident old-value])
      (when new-value
        [:db/add eid attr-ident new-value])]))
 
-(defn make-change-handler2
+(defn value-change-handler
   "Takes an app, an eid attr-ident and an old value, and builds a change handler for that value"
-  [app eid attr-ident]
-  (fn [new-value]
-    (log/info "change-handler" eid attr-ident new-value)
-    (global-tx!
-      app
-      [[:db.fn/call db-update-value eid attr-ident new-value]])))
+  [app eid attr-ident new-value]
+  (log/info "change-handler" eid attr-ident new-value)
+  (global-tx!
+    app
+    [[:db.fn/call db-update-value eid attr-ident new-value]]))
 
 (defn apply-reference-change!
+  "DEPRECATED"
   ([app eid attr-ident new-value]
    (apply-reference-change! app eid attr-ident nil new-value))
   ([app eid attr-ident old-value new-value]
@@ -864,13 +885,18 @@
        ;; For now hard coding this... For some reason using the summary function here is messing everything up
        :label-fn (or (::label-fn context) pull-summary-string)
        :model value
-       :on-change (partial apply-reference-change! app eid attr-ident value)]
+       :on-change ;;(partial apply-reference-change! app eid attr-ident value)
+       (partial value-change-handler app eid attr-ident)
+       ]
       (when-not (nil? value)
         [re-com/md-icon-button :md-icon-name "zmdi-close-circle"
          :size :smaller
          :style {:margin "3px 7px"}
          :tooltip "Retract"
-         :on-click #(apply-reference-change! app eid attr-ident value nil)])])))
+         :on-click
+         #(value-change-handler app eid attr-ident nil)
+;;          #(apply-reference-change! app eid attr-ident value nil)
+         ])])))
 
 
 ;; Simple md (markdown) component; Not sure if we really need to include this in dat.view or not...
@@ -902,6 +928,7 @@
   (cljs-time/date-time (cljs-time/year date) (cljs-time/month date) (cljs-time/day date) (cljs-time/hour dt) (cljs-time/minute dt) (cljs-time/second dt) (cljs-time/milli dt)))
 
 (defn datetime-change-handler
+  "DEPRECATED"
   [app datetime-mask-fn eid attr-ident current-value new-partial-value]
   (let [old-value @current-value
         new-value (datetime-mask-fn old-value new-partial-value)]
@@ -911,13 +938,23 @@
                         [[:db/retract eid attr-ident (cljs-time.coerce/to-date old-value)]])
                       [[:db/add eid attr-ident (cljs-time.coerce/to-date new-value)]]))))
 
+(defn datetime-change-handler2
+  [app datetime-mask-fn eid attr-ident current-value new-partial-value]
+  (let [old-value @current-value
+        new-value (datetime-mask-fn old-value new-partial-value)]
+    (reset! current-value new-value)
+    (global-tx! app
+              (concat (when old-value
+                        [[:db/retract eid attr-ident (cljs-time.coerce/to-date old-value)]])
+                      [[:db/add eid attr-ident (cljs-time.coerce/to-date new-value)]]))))
+
 (defn datetime-date-change-handler
   [app eid attr-ident current-value new-date-value]
-  (datetime-change-handler app datetime-with-date eid attr-ident current-value new-date-value))
+  (datetime-change-handler2 app datetime-with-date eid attr-ident current-value new-date-value))
 
 (defn datetime-time-int-change-handler
   [app eid attr-ident current-value new-time-value]
-  (datetime-change-handler app datetime-with-time-int eid attr-ident current-value new-time-value))
+  (datetime-change-handler2 app datetime-with-time-int eid attr-ident current-value new-time-value))
 
 (defn datetime->time-int [datetime]
   (let [dt (cljs-time/to-default-time-zone datetime)]
@@ -944,6 +981,7 @@
 
 
 (defn boolean-selector
+  "DEPRECATED"
   [app eid attr-ident value]
   (let [current-value (atom value)]
     (fn []
@@ -952,6 +990,20 @@
                     (let [old-value @current-value]
                       (reset! current-value new-value)
                       (send-tx! app
+                                (concat
+                                  (when-not (nil? old-value)
+                                    [[:db/retract eid attr-ident old-value]])
+                                  [[:db/add eid attr-ident new-value]]))))])))
+
+(defn boolean-selector2
+  [app eid attr-ident value]
+  (let [current-value (atom value)]
+    (fn []
+      [re-com/checkbox :model @current-value
+       :on-change (fn [new-value]
+                    (let [old-value @current-value]
+                      (reset! current-value new-value)
+                      (global-tx! app
                                 (concat
                                   (when-not (nil? old-value)
                                     [[:db/retract eid attr-ident old-value]])
@@ -1014,7 +1066,7 @@
          [datetime-selector app eid attr-ident value]
          ;; Booleans should be check boxes
          [{:db/valueType :db.type/boolean}]
-         [boolean-selector app eid attr-ident value]
+         [boolean-selector2 app eid attr-ident value]
          ;; For numeric inputs, want to style a little differently
          [{:db/valueType (:or :db.type/float :db.type/double :db.type/integer :db.type/long)}]
          (vec (concat [(if (::text-rows context) re-com/input-textarea re-com/input-text)
@@ -1022,7 +1074,7 @@
                        :style (::input-style context) ;; TODO Get input-style passed along through everywhere else
                        :width (-> context ::input-style :width)
                        :on-change ;;(make-change-handler app eid attr-ident value)
-                       (make-change-handler2 app eid attr-ident)
+                       (partial value-change-handler app eid attr-ident)
                        ]
                       (when-let [placeholder (::placeholder context)]
                         [:placeholder placeholder])
@@ -1035,7 +1087,7 @@
                        :style (::input-style context)
                        :width (-> context ::input-style :width)
                        :on-change ;;(make-change-handler app eid attr-ident value)
-                       (make-change-handler2 app eid attr-ident)
+                       (partial value-change-handler app eid attr-ident)
                        ]
                       (when-let [placeholder (::placeholder context)]
                         [:placeholder placeholder])
@@ -1046,6 +1098,7 @@
 ;; TODO Need to have some way of wrapping or overriding this in certain cases; How do we make this part of more default controls orthogonal?
 ;; For right now putting the main functionality inside a star function, then wrapping it in a dynamic var so you can override it, while still referring to the default functionality
 (defn create-type-reference*
+  "DEPRECATED"
   [app eid attr-ident type-ident]
   (send-tx!
     app
@@ -1056,9 +1109,21 @@
     [{:db/id -1 :e/type type-ident}
      [:db/add eid attr-ident -1]]))
 
+(defn create-type-reference2*
+  [app eid attr-ident type-ident]
+  (global-tx!
+    app
+    ;; Right now this also only works for isComponent :db.cardinality/many attributes. Should
+    ;; generalize for :db/isComponent false so you could add a non-ref attribute on the fly XXX
+    ;; This also may not work if you try to transact it locally, since type-ident doesn't resolve to the entity in DS (idents aren't really supported) XXX
+    ;; Could maybe work with a ref [:db/ident type-ident], but I don't know if these are supported in tx
+    [{:db/id -1 :e/type [:db/ident type-ident]}
+     ;; ***FIXME: :e/type is a ref not a keyword.
+     [:db/add eid attr-ident -1]]))
+
 (defn ^:dynamic create-type-reference
   [app eid attr-ident type-ident]
-  (create-type-reference* app eid attr-ident type-ident))
+  (create-type-reference2* app eid attr-ident type-ident))
 
 
 ;; TODO Need to rewrite in terms of representations

@@ -36,9 +36,6 @@
             [re-com.input-time]))
 
 
-
-
-
 ;; ## Represent
 
 ;; This is really the cornerstone of all of dat.view
@@ -401,6 +398,7 @@
 
 
 (defn get-remote-eid
+  "DEPRECATED"
   [app eid]
   @(pull-attr (:conn app) eid :dat.sync.remote.db/id))
   ;(:dat.sync.remote.db/id (d/pull @(:conn app) [:dat.sync.remote.db/id] eid)))
@@ -1118,7 +1116,6 @@
     ;; This also may not work if you try to transact it locally, since type-ident doesn't resolve to the entity in DS (idents aren't really supported) XXX
     ;; Could maybe work with a ref [:db/ident type-ident], but I don't know if these are supported in tx
     [{:db/id -1 :e/type [:db/ident type-ident]}
-     ;; ***FIXME: :e/type is a ref not a keyword.
      [:db/add eid attr-ident -1]]))
 
 (defn ^:dynamic create-type-reference

@@ -4,7 +4,7 @@
   [[;; ## Top level, generic, polymorphic attributes
     ;;
     {:db/id          #db/id[:db.part/db]
-     :db/ident       :dat.sync/uuident
+     :db/ident       :dat.sync/uuid
      :db/valueType   :db.type/uuid
      :db/cardinality :db.cardinality/one
      :db/unique :db.unique/identity

@@ -7,7 +7,7 @@
             [dat.reactor.onyx :as onyx]
 ;;             [rum.core :as rum]
             [reagent.core :as reagent]
-            [dat.sys.utils :refer [deep-merge cat-into]]
+            [dat.spec.utils :refer [deep-merge cat-into]]
             [com.stuartsierra.component :as component]))
 
 

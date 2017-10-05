@@ -1,4 +1,4 @@
-(defproject datview "0.0.1-alpha1-SNAPSHOT"
+(defproject datview "0.0.1-alpha3-SNAPSHOT"
   :description "Effortlessly compose data visualizations and controls for Datomic and DataScript data"
   :url "http://github.com/metasoarous/datview"
   :license {:name "Eclipse Public License"

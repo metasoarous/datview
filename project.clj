@@ -20,6 +20,7 @@
                  [posh "0.5.4"]
                  [reagent "0.6.0"]
                  [markdown-clj "0.9.89"]
+                 [onyx-sim "0.1.0"]
                  [servant "0.1.5"]
                  ;; Not sure if this should just be a dev dep; It's kinda nice
                  [data-frisk-reagent "0.3.5"]

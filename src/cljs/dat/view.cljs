@@ -12,6 +12,7 @@
             [dat.view.routes :as routes]
             [dat.view.settings :as settings]
             [dat.spec.protocols :as protocols]
+            [onyx.sim.core :as sim]
     ;; Things outside datsys, but intimately tied to datsys
             [datascript.core :as d]
             [posh.reagent :as posh]

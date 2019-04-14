@@ -23,7 +23,7 @@
                  [servant "0.1.5"]
                  ;; Not sure if this should just be a dev dep; It's kinda nice
                  [data-frisk-reagent "0.3.5"]
-                 [re-com "0.8.3"]
+                 [re-com "0.9.0" :exclusions [cljsjs/react cljsjs/react-dom]]
                  [bidi "2.0.9"]
                  [io.rkn/conformity "0.4.0"] ;; should this be here?
                  [prismatic/plumbing "0.5.2"] ;; aren't using currently

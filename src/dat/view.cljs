@@ -26,7 +26,7 @@
             [goog.date.Date]
             [cljs-time.core :as cljs-time]
             [cljs.core.async :as async]
-            [cljs.spec :as s]
+            [cljs.spec.alpha :as s]
             [cljs-time.format]
             [cljs-time.coerce]
             [cljs.pprint :as pp]
@@ -37,6 +37,12 @@
 
 
 
+(defn- time->mins
+  [time]
+  (rem time 100))
+(defn- time->hrs
+  [time]
+  (quot time 100))
 
 
 ;; ## Represent
@@ -855,8 +861,8 @@
                        (cljs-time/year dt)
                        (cljs-time/month dt)
                        (cljs-time/day dt)
-                       (re-com.input-time/time->hrs time-int)
-                       (re-com.input-time/time->mins time-int)
+                       (time->hrs time-int)
+                       (time->mins time-int)
                        (cljs-time/second dt)
                        (cljs-time/milli dt))
                                  ;; FIXME: 2400 + second & milli does not exist

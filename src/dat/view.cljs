@@ -803,8 +803,12 @@
                                     (:conn app)
                                     [:db/ident attr-ident]
                                     posh-options)]
-                       (mapv (comp deref (partial posh/pull (:conn app) '[* {:e/type [*]}]))
-                             eids)))]
+                       ;; NOTE This appears to be quite a bit slower than the pull-many below, maybe because
+                       ;; of having to parse/preprocess the same pull expression over and over;
+                       ;; TODO Should be fixed in posh ultimately, maybe with a posh/pull-many
+                       ;(mapv (comp deref (partial posh/pull (:conn app) '[* {:e/type [*]}]))
+                             ;eids)))]
+                       (d/pull-many @(:conn app) '[* {:e/type [*]}])))]
                      ;@(posh/q '[:find [(pull ?e [:db/id :db/ident * {:e/type [*]}]) ...]
                      ;           :in $ % ?attr
                      ;           :where [?attr :attribute.ref/types ?type]
@@ -827,7 +831,9 @@
      [select-entity-input app context eid attr-ident value options]))
   ([app context eid attr-ident value options]
    (let [value (utils/deref-or-value value)
+         ;; TODO We need to be able to switch between these for remote vs local
          id-fn (or (::id-fn context) :db/id)
+         ;id-fn (or (::id-fn context) :dat.sync.remote.db/id)
          value (or (id-fn value)
                    (and (vector? value) @(pull-attr (:conn app) value id-fn))
                    value)]

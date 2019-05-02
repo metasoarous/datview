@@ -2,6 +2,7 @@
   (:require
     #?(:cljs [reagent.core :as r])
     #?(:cljs [reagent.ratom :refer-macros [reaction]])
+    [#?(:clj clojure.pprint :cljs cljs.pprint) :as pprint]
     [taoensso.timbre :as log]
     [dat.view.styles :as styles]
     #?(:cljs [dat.view.context :as context])))
@@ -55,7 +56,9 @@
     (try
       (representation-fn app representation data)
       (catch #?(:clj Exception :cljs :default) e
-        (let [collapse? (cljc-atom true)]
+        (let [collapse? (cljc-atom true)
+              rep-collapse? (cljc-atom true)
+              data-collapse? (cljc-atom true)]
           (fn [app representation data]
             (log/error e (str "Exception raised for representation: " representation-id))
             [:div.error {:style {:border-style "solid" :border-color "red" :padding "8px 12px" :margin "15px 3px"}}
@@ -68,8 +71,14 @@
                  #?(:cljs (try (.-stack e) (catch :default e "!!!Unable to print stack trace!!!")))]
                 [:p "representation:"]
                 [:pre (pr-str representation)]
+                [:p [:a {:on-click (fn [& args] (swap! rep-collapse? not))} "Show pprint"]]
+                (when-not @rep-collapse?
+                  [:pre (with-out-str (pprint/pprint representation))])
                 [:p "Data:"]
-                [:pre (pr-str data)]])]))))))
+                [:pre (pr-str data)]
+                [:p [:a {:on-click (fn [& args] (swap! data-collapse? not))} "Show pprint"]]
+                (when-not @data-collapse?
+                  [:pre (with-out-str (pprint/pprint data))])])]))))))
 
 
 (defn representation-override

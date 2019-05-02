@@ -759,7 +759,11 @@
   ([app eid attr-ident old-value new-value]
    (let [old-value (match [old-value]
                           [{:db/id id}] id
-                          [id] id)]
+                          [id] id)
+         {new-value-id :dat.sync.remote.db/id new-value-ident :db/ident} (d/pull @(:conn app) '[:dat.sync.remote.db/id :db/ident] new-value)
+         {old-value-id :dat.sync.remote.db/id old-value-ident :db/ident} (d/pull @(:conn app) '[:dat.sync.remote.db/id :db/ident] old-value)
+         new-value (or new-value-id new-value-ident new-value)
+         old-value (or old-value-id old-value-ident old-value)]
      (send-tx! app
                (concat (when-not (nil? new-value)
                          [[:db/add eid attr-ident new-value]])
@@ -769,6 +773,8 @@
 
 ;; this is doing strange things with options when we memoize it, so leaving that out for now...
 ;(def ref-attr-options nil)
+
+
 (def ref-attr-options
   (memoize
     (fn

@@ -808,7 +808,7 @@
                        ;; TODO Should be fixed in posh ultimately, maybe with a posh/pull-many
                        ;(mapv (comp deref (partial posh/pull (:conn app) '[* {:e/type [*]}]))
                              ;eids)))]
-                       (d/pull-many @(:conn app) '[* {:e/type [*]}])))]
+                       (d/pull-many @(:conn app) '[* {:e/type [*]}] eids)))]
                      ;@(posh/q '[:find [(pull ?e [:db/id :db/ident * {:e/type [*]}]) ...]
                      ;           :in $ % ?attr
                      ;           :where [?attr :attribute.ref/types ?type]

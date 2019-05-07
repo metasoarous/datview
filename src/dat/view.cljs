@@ -952,75 +952,81 @@
 
 ;; Should have this effectively mutlitmethod dispatch using the dat.view customization functionality
 (defn input-for
-  ([app context pull-expr eid attr-ident value]
-   (let [child-context (assoc (:dat.view.context/locals context)
-                         ::pull-expr pull-expr)]
-     [represent app [::input-for child-context] [eid attr-ident value]])))
+  [app context [eid attr-ident value]]
+
+   ;; This was in the old input-for function, which used to be defined in terms of the representation, not the
+   ;; other way around as it is now. Not sure why this was necessary or if it was actually being used
+   ;; anwhere or if we need it still
+   ;(let [child-context (assoc (:dat.view.context/locals context)
+                         ;::pull-expr pull-expr)]
+     ;[represent app [::input-for child-context] [eid attr-ident value]]
+
+  ;; TODO Need to rewrite in terms of representations
+  (let [attr @(attr-signature-reaction app attr-ident)
+        pull-expr (::pull-expr context)
+        local-context (:dat.view.context/locals context)]
+    [:div (:dom/attrs context)
+     ;; TODO This crap should be taken care of by middleware
+     (let [control-context (assoc local-context ::controls (::controls context))]
+       [represent app [::control-set control-context] [eid attr-ident value]])
+     (match [attr]
+       ;; The first two forms here have to be compbined and the decision about whether to do a dropdown
+       ;; left as a matter of the context (at least for customization); For now leaving though... XXX
+       ;; We have an isComponent ref; do nested form
+       ;; Should this clause just be polymorphic on whether value is a map or not?
+       [{:db/valueType :db.type/ref :db/isComponent true}]
+       ;; Need to assoc in the root node context here
+       (let [sub-expr (some #(get % attr-ident) pull-expr) ;; XXX This may not handle a ref not in {}
+             ;; Need to handle situation of a recur point ('...) as a specification; Should be the context pull root, or the passed in expr, if needed
+             sub-expr (if (= sub-expr '...) (or (:dat.view/root-pull-expr context) pull-expr) sub-expr)
+             local-context (assoc local-context ::pull-expr sub-expr)
+             local-context (if (:dat.view/root-pull-expr context)
+                             local-context
+                             (assoc local-context :dat.view/root-pull-expr pull-expr))]
+         ;(when-not (= (:db/cardinality attr) :db.cardinality/many)
+         ;;(nil? value))
+         [pull-form app local-context sub-expr value])
+       ;; This is where we can insert something that catches certain things and handles them separately, depending on context
+       ;[{:db/valueType :db.type/ref} {:dat.view.level/attr {?}}]
+       ;[pull-form app context-data (get pull-expr value)]
+       ;; TODO Need to redo all the below as representations
+       ;; Non component entity; Do dropdown select...
+       [{:db/valueType :db.type/ref}]
+       [select-entity-input app context eid attr-ident value]
+       ;; Need separate handling of datetimes
+       [{:db/valueType :db.type/instant}]
+       [datetime-selector app eid attr-ident value]
+       ;; Booleans should be check boxes
+       [{:db/valueType :db.type/boolean}]
+       [boolean-selector app eid attr-ident value]
+       ;; For numeric inputs, want to style a little differently
+       [{:db/valueType (:or :db.type/float :db.type/double :db.type/integer :db.type/long)}]
+       (vec (concat [(if (::text-rows context) re-com/input-textarea re-com/input-text)
+                     :model (str value) ;; just to make sure...
+                     :style (::input-style context) ;; TODO Get input-style passed along through everywhere else
+                     :width (-> context ::input-style :width)
+                     :on-change (make-change-handler app eid attr-ident value)]
+                    (when-let [placeholder (::placeholder context)]
+                      [:placeholder placeholder])
+                    (when-let [rows (::text-rows context)]
+                      [:rows rows])))
+       ;; Misc; Simple input, but maybe do a dynamic type dispatch as well for customization...
+       :else
+       (vec (concat [(if (::text-rows context) re-com/input-textarea re-com/input-text)
+                     :model (str value) ;; just to make sure...
+                     :style (::input-style context)
+                     :width (-> context ::input-style :width)
+                     :on-change (make-change-handler app eid attr-ident value)]
+                    (when-let [placeholder (::placeholder context)]
+                      [:placeholder placeholder])
+                    (when-let [rows (::text-rows context)]
+                      [:rows rows]))))]))
 
 
 (representation/register-representation
   ::input-for
   (fn [app [_ context] [eid attr-ident value]]
-    ;; TODO Need to rewrite in terms of representations
-    (let [attr @(attr-signature-reaction app attr-ident)
-          pull-expr (::pull-expr context)
-          local-context (:dat.view.context/locals context)]
-      [:div (:dom/attrs context)
-       ;; TODO This crap should be taken care of by middleware
-       (let [control-context (assoc local-context ::controls (::controls context))]
-         [represent app [::control-set control-context] [eid attr-ident value]])
-       (match [attr]
-         ;; The first two forms here have to be compbined and the decision about whether to do a dropdown
-         ;; left as a matter of the context (at least for customization); For now leaving though... XXX
-         ;; We have an isComponent ref; do nested form
-         ;; Should this clause just be polymorphic on whether value is a map or not?
-         [{:db/valueType :db.type/ref :db/isComponent true}]
-         ;; Need to assoc in the root node context here
-         (let [sub-expr (some #(get % attr-ident) pull-expr) ;; XXX This may not handle a ref not in {}
-               ;; Need to handle situation of a recur point ('...) as a specification; Should be the context pull root, or the passed in expr, if needed
-               sub-expr (if (= sub-expr '...) (or (:dat.view/root-pull-expr context) pull-expr) sub-expr)
-               local-context (assoc local-context ::pull-expr sub-expr)
-               local-context (if (:dat.view/root-pull-expr context)
-                               local-context
-                               (assoc local-context :dat.view/root-pull-expr pull-expr))]
-           ;(when-not (= (:db/cardinality attr) :db.cardinality/many)
-           ;;(nil? value))
-           [pull-form app local-context sub-expr value])
-         ;; This is where we can insert something that catches certain things and handles them separately, depending on context
-         ;[{:db/valueType :db.type/ref} {:dat.view.level/attr {?}}]
-         ;[pull-form app context-data (get pull-expr value)]
-         ;; TODO Need to redo all the below as representations
-         ;; Non component entity; Do dropdown select...
-         [{:db/valueType :db.type/ref}]
-         [select-entity-input app context eid attr-ident value]
-         ;; Need separate handling of datetimes
-         [{:db/valueType :db.type/instant}]
-         [datetime-selector app eid attr-ident value]
-         ;; Booleans should be check boxes
-         [{:db/valueType :db.type/boolean}]
-         [boolean-selector app eid attr-ident value]
-         ;; For numeric inputs, want to style a little differently
-         [{:db/valueType (:or :db.type/float :db.type/double :db.type/integer :db.type/long)}]
-         (vec (concat [(if (::text-rows context) re-com/input-textarea re-com/input-text)
-                       :model (str value) ;; just to make sure...
-                       :style (::input-style context) ;; TODO Get input-style passed along through everywhere else
-                       :width (-> context ::input-style :width)
-                       :on-change (make-change-handler app eid attr-ident value)]
-                      (when-let [placeholder (::placeholder context)]
-                        [:placeholder placeholder])
-                      (when-let [rows (::text-rows context)]
-                        [:rows rows])))
-         ;; Misc; Simple input, but maybe do a dynamic type dispatch as well for customization...
-         :else
-         (vec (concat [(if (::text-rows context) re-com/input-textarea re-com/input-text)
-                       :model (str value) ;; just to make sure...
-                       :style (::input-style context)
-                       :width (-> context ::input-style :width)
-                       :on-change (make-change-handler app eid attr-ident value)]
-                      (when-let [placeholder (::placeholder context)]
-                        [:placeholder placeholder])
-                      (when-let [rows (::text-rows context)]
-                        [:rows rows]))))])))
+    (input-for app context [eid attr-ident value])))
 
 
 ;; TODO Need to have some way of wrapping or overriding this in certain cases; How do we make this part of more default controls orthogonal?
